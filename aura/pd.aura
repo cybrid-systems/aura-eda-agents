@@ -1,0 +1,241 @@
+;; aura/pd.aura — AgenticPD 式"阶段感知树搜索"的 Aura 原型（环境是合成的 tools/pdsim.py）
+;;
+;; 树节点 n = (各阶段设置下标 x, 各阶段检查点, QoR, 阶段瓶颈 pen)。
+;; Judge 每轮选 (节点 n̂, 分支阶段 b, 提示 h)；阶段 Agent 给出阶段 b 的新设置；
+;; 分支从 b 开始重跑到 GR，b 之前的阶段直接复用父节点检查点（零成本）。
+;; 每个分支在自己的 fiber + COW overlay 里跑（并行宽度 W），Judge 收齐后只让刷新 incumbent 的分支 overlay-commit。
+
+(define *pd-stages* (list "FP" "PL" "CTS" "GR"))
+(define *pd-space* #f)
+(define *pd-budget* (string->number (env-or "PD_BUDGET" "20")))   ;; 昂贵评估（到 GR 的完整候选）预算，和论文设置一致：20
+(define *pd-width* (string->number (env-or "PD_WIDTH" "2")))      ;; 每轮并行分支数
+(define pd-incumbent "none")   ;; 全局 incumbent 检查点；只有被 Judge 批准的分支能在 overlay 里改它并提交
+
+;; Judge 策略参数（c_explore, w_bottleneck, w_hist）。写成过程，演化门禁用 mutate:rebind 改它、ast:restore 回退。
+(define (judge-policy) (list 0.6 0.8 0.5))
+
+(define (pd-init! dir)
+  (sh (string-append "mkdir -p " dir))
+  (run! (string-append *py* " tools/pdsim.py space --out " dir "/space.json"))
+  (set! *pd-space* (read-json (string-append dir "/space.json"))))
+(define (pd-combos s) (hget (hget *pd-space* "combos" #f) (list-ref *pd-stages* s) (list)))
+(define (pd-neighbors s c) (list-ref (hget (hget *pd-space* "neighbors" #f) (list-ref *pd-stages* s) (list)) c))
+(define (pd-default-idx) (hget *pd-space* "default_idx" (list)))
+
+;; ---- 运行上下文 ----
+(define (ctx-make design method seed dir reuse)
+  (let ((c (hash)))
+    (hash-set! c "design" design) (hash-set! c "method" method) (hash-set! c "dir" dir) (hash-set! c "reuse" reuse)
+    (hash-set! c "rng" (rng-make seed)) (hash-set! c "nodes" (list)) (hash-set! c "next" 0) (hash-set! c "evals" 0)
+    (hash-set! c "tried" (hash)) (hash-set! c "stage-tries" (list 0 0 0 0)) (hash-set! c "stage-gains" (list 0 0 0 0))
+    (hash-set! c "exp" (hash)) (hash-set! c "branch-stages" (list)) (hash-set! c "commits" 0) (hash-set! c "rollbacks" 0)
+    (sh (string-append "rm -rf " dir " && mkdir -p " dir))
+    c))
+(define (ctx-get c k) (hash-ref c k))
+(define (ctx-inc! c k i) (hash-set! c k (set-nth (hash-ref c k) i (+ 1 (list-ref (hash-ref c k) i)))))
+
+;; 一个分支请求：父节点（或 #f 表示从头），分支阶段 b，完整设置下标 idx
+(define (branch-cmd c parent b idx id)
+  (let* ((dir (ctx-get c "dir")) (reuse (and parent (ctx-get c "reuse") (> b 0)))
+         (from (if reuse (list-ref *pd-stages* b) "FP"))
+         (pck (if reuse (list-ref (hget parent "ckpts" (list)) (- b 1)) "-"))
+         (pre (format "~a/b~a" dir id)))
+    (list pre (string-append *py* " tools/pdsim.py chain --design " (ctx-get c "design") " --parent " pck " --from " from
+                             " --knobs idx:" (nums->csv idx) " --outdir " pre " --ledger " pre ".ledger.jsonl --out " pre ".json"))))
+
+(define (node-from-result c res parent b id)
+  (let* ((n (hash)) (nodes (hget res "nodes" (list))) (fin (hget res "final" #f))
+         (pidx (if parent (hget parent "ckpts" (list)) (list #f #f #f #f)))
+         (stages-run (map (lambda (x) (hget x "stage" "")) nodes))
+         (ckpts (map (lambda (s) (let ((i (list-index-of stages-run (list-ref *pd-stages* s))))
+                                   (if (>= i 0) (hget (list-ref nodes i) "ckpt" #f) (list-ref pidx s))))
+                     (range 4)))
+         (last (list-ref nodes (- (length nodes) 1))) (pen (hget last "pen" (hash))))
+    (hash-set! n "id" id) (hash-set! n "parent" (if parent (hget parent "id" -1) -1)) (hash-set! n "b" b)
+    (hash-set! n "ckpts" ckpts) (hash-set! n "wns" (hget fin "wns" -1e9)) (hash-set! n "power" (hget fin "power" 0))
+    (hash-set! n "area" (hget fin "area" 0)) (hash-set! n "cong" (hget fin "cong" 0))
+    (hash-set! n "fail" (not (hget res "complete" #f)))
+    (hash-set! n "pen" (map (lambda (s) (hget pen (list-ref *pd-stages* s) 0)) (range 4)))
+    (hash-set! n "visits" 0)
+    n))
+
+(define (pd-incumbent-node c)
+  (let ((ok (filter (lambda (n) (not (hget n "fail" #t))) (ctx-get c "nodes"))))
+    (if (null? ok) #f (argmax (lambda (n) (hget n "wns" -1e9)) ok))))
+
+;; 并行跑一批分支：每个分支一个 fiber + overlay；Judge（主 fiber）收齐后裁决 commit / rollback
+(define (run-branches! c specs)   ;; specs: list of (parent b idx)
+  (let* ((res (channel:create 16)) (fin (channel:create 16))
+         (ids (map (lambda (sp) (let ((i (ctx-get c "next"))) (hash-set! c "next" (+ i 1)) i)) specs))
+         (verdicts (map (lambda (sp) (channel:create 1)) specs))
+         (cmds (map (lambda (k) (let ((sp (list-ref specs k))) (branch-cmd c (car sp) (cadr sp) (caddr sp) (list-ref ids k)))) (range (length specs))))
+         (fs (map (lambda (k)
+                    (let ((pre (car (list-ref cmds k))) (cmd (cadr (list-ref cmds k))) (vch (list-ref verdicts k)))
+                      (spawn-reporting fin k
+                        (lambda ()
+                          (let ((pre pre) (cmd cmd) (vch vch) (k k) (res res))
+                            (fiber:overlay-begin)
+                            (run-bg! cmd (string-append pre ".done"))
+                            (await-file (string-append pre ".done"))
+                            (fiber:overlay-define "pd-incumbent" (string-append pre "/GR.json"))   ;; 私有写：别的分支看不到
+                            (channel:send res (list k pre))
+                            (if (equal? (channel:recv vch) "commit")
+                                (begin (fiber:overlay-commit) "commit")
+                                (begin (fiber:overlay-rollback) "rollback")))))))
+                  (range (length specs))))
+         (got (map (lambda (f) (channel:recv res)) fs))
+         (before (pd-incumbent-node c))
+         (new-nodes
+           (map (lambda (k)
+                  (let* ((pre (cadr (car (filter (lambda (g) (= (car g) k)) got))))
+                         (sp (list-ref specs k))
+                         (r (read-json (string-append pre ".json"))))     ;; 只在主 fiber 解析 JSON（aura#4788）
+                    (node-from-result c r (car sp) (cadr sp) (list-ref ids k))))
+                (range (length specs))))
+         (best-new (let ((ok (filter (lambda (n) (not (hget n "fail" #t))) new-nodes)))
+                     (if (null? ok) #f (argmax (lambda (n) (hget n "wns" -1e9)) ok))))
+         (win (and best-new (or (not before) (> (hget best-new "wns" -1e9) (hget before "wns" -1e9))))))
+    (for-each (lambda (k) (channel:send (list-ref verdicts k)
+                                        (if (and win (= (hget (list-ref new-nodes k) "id" -1) (hget best-new "id" -2))) "commit" "rollback")))
+              (range (length specs)))
+    (let ((sts (map (lambda (f) (channel:recv fin)) fs)))
+      (for-each fiber:join fs)
+      (for-each (lambda (s) (if (equal? s "commit") (hash-set! c "commits" (+ 1 (ctx-get c "commits")))
+                                (hash-set! c "rollbacks" (+ 1 (ctx-get c "rollbacks"))))) sts))
+    (hash-set! c "evals" (+ (ctx-get c "evals") (length specs)))
+    (hash-set! c "nodes" (append (ctx-get c "nodes") new-nodes))
+    ;; 经验：分支阶段 b 的设置相对父节点的 WNS 增量
+    (for-each (lambda (k)
+                (let* ((sp (list-ref specs k)) (p (car sp)) (b (cadr sp)) (n (list-ref new-nodes k)))
+                  (if p
+                      (let* ((d (if (hget n "fail" #t) -100.0 (- (hget n "wns" 0) (hget p "wns" 0))))
+                             (key (format "~a:~a" b (list-ref (caddr sp) b)))
+                             (old (hget (ctx-get c "exp") key (list 0 0))))
+                        (hash-set! p "visits" (+ 1 (hget p "visits" 0)))
+                        (hash-set! (ctx-get c "exp") key (list (+ (car old) d) (+ (cadr old) 1)))
+                        (ctx-inc! c "stage-tries" b)
+                        (if (> d 0) (ctx-inc! c "stage-gains" b) #f)
+                        (hash-set! c "branch-stages" (cons b (ctx-get c "branch-stages"))))
+                      #f)))
+              (range (length specs)))
+    new-nodes))
+
+;; ---- 阶段 Agent：给定节点和阶段，提出该阶段的新设置（不重复已试过的）----
+;; 上下文 = 上游 QoR（节点拥塞/WNS）、经验摘要（exp：各设置的平均增益）、知识提示 h
+(define (knob-of s c k) (hget (list-ref (pd-combos s) c) k 0))
+(define (hint-bonus s cand cur h)
+  (let ((dir (if (equal? h "reduce-congestion") -1 1)))
+    (cond ((= s 0) (* dir (- (knob-of s cand "util") (knob-of s cur "util")) 10))
+          ((= s 1) (* dir (- (knob-of s cand "density") (knob-of s cur "density")) 10))
+          ((= s 2) (* dir (- (knob-of s cand "margin") (knob-of s cur "margin")) 20))
+          (else (* -1 dir (- (knob-of s cand "ladj") (knob-of s cur "ladj")) 5)))))
+(define (stage-agent c n s h)
+  (let* ((idx (hget n "idx" (list))) (cur (list-ref idx s)) (tried (ctx-get c "tried"))
+         (fresh (lambda (cand) (and (not (= cand cur)) (not (hget tried (format "~a|~a|~a" (hget n "id" -1) s cand) #f)))))
+         (local (filter fresh (pd-neighbors s cur)))
+         (pool (if (null? local) (filter fresh (range (length (pd-combos s)))) local)))
+    (if (null? pool) #f
+        (let* ((r (ctx-get c "rng"))
+               (score (lambda (cand)
+                        (let ((e (hget (ctx-get c "exp") (format "~a:~a" s cand) (list 0 0))))
+                          (+ (if (> (cadr e) 0) (/ (car e) (cadr e)) 0)
+                             (hint-bonus s cand cur h)
+                             (* 2.0 (rng-float! r))))))
+               (best (argmax score pool)))
+          (hash-set! tried (format "~a|~a|~a" (hget n "id" -1) s best) #t)
+          best))))
+
+;; ---- Judge ----
+(define (pen-gap c n s)   ;; 阶段瓶颈 B(s)：该节点在阶段 s 的损失与全树最佳之差
+  (let ((ok (filter (lambda (m) (not (hget m "fail" #t))) (ctx-get c "nodes"))))
+    (- (list-ref (hget n "pen" (list 0 0 0 0)) s)
+       (foldl (lambda (a m) (min a (list-ref (hget m "pen" (list 0 0 0 0)) s))) 1e9 ok))))
+(define (judge-hint n) (if (> (hget n "cong" 0) 0.80) "reduce-congestion" "improve-timing"))
+
+(define (judge-select c mode)   ;; 返回 list of (node b hint)，至多 W 个，各不相同
+  (let* ((ok (filter (lambda (m) (not (hget m "fail" #t))) (ctx-get c "nodes")))
+         (inc (pd-incumbent-node c))
+         (pol (judge-policy)) (cx (car pol)) (wb (cadr pol)) (wh (caddr pol))
+         (wmin (foldl (lambda (a m) (min a (hget m "wns" 0))) 1e9 ok))
+         (wmax (foldl (lambda (a m) (max a (hget m "wns" 0))) -1e9 ok))
+         (T (+ 1 (ctx-get c "evals")))
+         (gapmax (+ 1e-6 (foldl (lambda (a m) (foldl (lambda (b s) (max b (pen-gap c m s))) a (range 4))) 0 ok)))
+         (pairs
+           (if (equal? mode "greedy")
+               (map (lambda (s) (list inc s (pen-gap c inc s))) (range 4))
+               (apply append
+                 (map (lambda (m)
+                        (let ((q (/ (- (hget m "wns" 0) wmin) (+ 1e-6 (- wmax wmin))))
+                              (e (sqrt (/ (log (+ T 1.0)) (+ 1.0 (hget m "visits" 0))))))
+                          (map (lambda (s)
+                                 (let* ((tr (list-ref (ctx-get c "stage-tries") s))
+                                        (hs (if (= tr 0) 1.0 (/ (* 1.0 (list-ref (ctx-get c "stage-gains") s)) tr))))
+                                   (list m s (+ q (* cx e) (* wb (/ (pen-gap c m s) gapmax)) (* wh hs)))))
+                               (range 4))))
+                      ok))))
+         (sorted (list-sort (lambda (a b) (> (caddr a) (caddr b))) pairs)))
+    (let loop ((ps sorted) (acc (list)))
+      (if (or (null? ps) (>= (length acc) *pd-width*)) (reverse acc)
+          (let* ((p (car ps)) (n (car p)) (s (cadr p)) (h (judge-hint n)) (cand (stage-agent c n s h)))
+            (if cand
+                (loop (cdr ps) (cons (list n s (set-nth (hget n "idx" (list)) s cand)) acc))
+                (loop (cdr ps) acc)))))))
+
+;; ---- 方法 ----
+(define (random-idx r) (map (lambda (s) (rng-int! r (length (pd-combos s)))) (range 4)))
+(define (mutate-idx r idx)   ;; AutoTuner 式局部扰动：改 1~2 个阶段，各取一个一步邻居
+  (let* ((k (+ 1 (rng-int! r 2))))
+    (let loop ((i 0) (x idx))
+      (if (= i k) x
+          (let* ((s (rng-int! r 4)) (nb (pd-neighbors s (list-ref x s))))
+            (loop (+ i 1) (set-nth x s (rng-pick! r nb))))))))
+
+(define (attach-idx! nodes specs) (for-each (lambda (k) (hash-set! (list-ref nodes k) "idx" (caddr (list-ref specs k)))) (range (length nodes))))
+(define (run-specs! c specs) (let ((ns (run-branches! c specs))) (attach-idx! ns specs) ns))
+
+(define (pd-run design method seed dir)
+  (let* ((reuse (not (equal? method "judge-norerun")))
+         (c (ctx-make design method seed dir (and reuse (or (equal? method "judge") (equal? method "greedy")))))
+         (r (ctx-get c "rng")))
+    (set! pd-incumbent "none")
+    (cond
+      ((equal? method "random")
+       (let loop () (if (< (ctx-get c "evals") *pd-budget*)
+                        (begin (run-specs! c (map (lambda (i) (list #f 0 (random-idx r))) (range (min *pd-width* (- *pd-budget* (ctx-get c "evals")))))) (loop)) #f)))
+      (else
+       (run-specs! c (list (list #f 0 (pd-default-idx))))
+       (if (equal? method "default") #f
+           (let loop ()
+             (if (< (ctx-get c "evals") *pd-budget*)
+                 (let* ((room (- *pd-budget* (ctx-get c "evals")))
+                        (specs
+                          (cond ((equal? method "autotuner")
+                                 (let ((inc (pd-incumbent-node c)))
+                                   (map (lambda (i) (list #f 0 (mutate-idx r (hget inc "idx" (pd-default-idx))))) (range (min *pd-width* room)))))
+                                (else
+                                 (let ((sel (judge-select c (if (equal? method "greedy") "greedy" "judge"))))
+                                   (take (map (lambda (x) (list (car x) (cadr x) (caddr x))) sel) room))))))
+                   (if (null? specs) #f (begin (run-specs! c specs) (loop))))
+                 #f)))))
+    (pd-finish c)))
+
+(define (pd-finish c)
+  (let* ((dir (ctx-get c "dir")) (inc (pd-incumbent-node c)) (out (hash)))
+    (if inc
+        (begin (run! (string-append *py* " tools/pdsim.py dr --ckpt " (list-ref (hget inc "ckpts" (list)) 3)
+                                    " --ledger " dir "/dr.ledger.jsonl --out " dir "/dr.json"))
+               (hash-set! out "dr_wns" (hget (read-json (string-append dir "/dr.json")) "wns" #f)))
+        (hash-set! out "dr_wns" #f))
+    (run! (string-append *py* " tools/pdsim.py ledger --glob '" dir "/*.ledger.jsonl' --out " dir "/ledger.json"))
+    (let ((L (read-json (string-append dir "/ledger.json"))) (bs (ctx-get c "branch-stages")))
+      (hash-set! out "design" (ctx-get c "design")) (hash-set! out "method" (ctx-get c "method"))
+      (hash-set! out "gr_wns" (if inc (hget inc "wns" #f) #f))
+      (hash-set! out "power" (if inc (hget inc "power" #f) #f)) (hash-set! out "area" (if inc (hget inc "area" #f) #f))
+      (hash-set! out "evals" (ctx-get c "evals")) (hash-set! out "gr_runs" (hget L "gr_evals" 0))
+      (hash-set! out "stage_runs" (- (hget L "runs" 0) (hget (hget L "by_stage" #f) "DR" 0)))
+      (hash-set! out "cost" (hget L "cost" 0))
+      (hash-set! out "fails" (length (filter (lambda (n) (hget n "fail" #f)) (ctx-get c "nodes"))))
+      (hash-set! out "branch_stage_hist" (map (lambda (s) (length (filter (lambda (b) (= b s)) bs))) (range 4)))
+      (hash-set! out "commits" (ctx-get c "commits")) (hash-set! out "rollbacks" (ctx-get c "rollbacks"))
+      (hash-set! out "incumbent_global" pd-incumbent)
+      out)))

@@ -108,12 +108,41 @@ def append_ledger(path, rec):
         f.write(json.dumps(rec, sort_keys=True) + "\n")
 
 
+def combos(stage):
+    """阶段旋钮组合的固定枚举顺序（Aura 侧用下标表示一个阶段的设置）。"""
+    import itertools
+    ks = sorted(SPACE[stage])
+    return [dict(zip(ks, v)) for v in itertools.product(*[SPACE[stage][k] for k in ks])]
+
+
+def neighbors(stage):
+    """一步邻居：只改一个旋钮、且只移动一档。"""
+    cs = combos(stage); ks = sorted(SPACE[stage]); out = []
+    for c in cs:
+        nb = []
+        for j, d in enumerate(cs):
+            diff = [k for k in ks if c[k] != d[k]]
+            if len(diff) == 1:
+                k = diff[0]; vals = SPACE[stage][k]
+                if abs(vals.index(c[k]) - vals.index(d[k])) == 1: nb.append(j)
+        out.append(nb)
+    return out
+
+
+def knobs_from_idx(s):
+    idx = [int(x) for x in s.split(",")]
+    return {st: combos(st)[i] for st, i in zip(STAGES, idx)}
+
+
 def cmd_space(a):
-    json.dump({"stages": STAGES, "space": SPACE, "default": DEFAULT, "cost": COST, "designs": sorted(DESIGNS)}, open(a.out, "w"))
+    json.dump({"stages": STAGES, "space": SPACE, "default": DEFAULT, "cost": COST, "designs": sorted(DESIGNS),
+               "combos": {s: combos(s) for s in STAGES}, "neighbors": {s: neighbors(s) for s in STAGES},
+               "default_idx": [combos(s).index(DEFAULT[s]) for s in STAGES]}, open(a.out, "w"), sort_keys=True)
 
 
 def cmd_chain(a):
-    knobs = json.loads(a.knobs) if not a.knobs.startswith("@") else json.load(open(a.knobs[1:]))
+    if a.knobs.startswith("idx:"): knobs = knobs_from_idx(a.knobs[4:])
+    else: knobs = json.loads(a.knobs) if not a.knobs.startswith("@") else json.load(open(a.knobs[1:]))
     st = {} if a.parent in ("-", "") else json.load(open(a.parent))
     i0 = STAGES.index(a.frm)
     if i0 > 0 and st.get("stage") is None:
@@ -135,7 +164,7 @@ def cmd_chain(a):
         st["ancestors"] = dict(anc, **{sname: path})
         st["design"] = a.design
         json.dump(st, open(path, "w"), sort_keys=True)
-        append_ledger(a.ledger, {"design": a.design, "stage": sname, "cost": COST[sname], "ckpt": path})
+        append_ledger(a.ledger, {"design": a.design, "stage": sname, "cost": COST[sname], "ckpt": path, "reused": STAGES[:i0]})
         nodes.append({"stage": sname, "ckpt": path, "knobs": kn, "qor": st["qor"], "pen": st["pen"]})
         if st["qor"]["route_fail"]:
             break
