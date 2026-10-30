@@ -11,8 +11,9 @@
 (define *pd-width* (string->number (env-or "PD_WIDTH" "2")))      ;; 每轮并行分支数
 (define pd-incumbent "none")   ;; 全局 incumbent 检查点；只有被 Judge 批准的分支能在 overlay 里改它并提交
 
-;; Judge 策略参数（c_explore, w_bottleneck, w_hist）。写成过程，演化门禁用 mutate:rebind 改它、ast:restore 回退。
-(define (judge-policy) (list 0.6 0.8 0.5))
+;; Judge 策略参数（c_explore, w_bottleneck, w_hist）。放在 live AST（set-code）里：
+;; 演化门禁用 mutate:rebind 改它、ast:restore 回退（见 aura/evolve.aura）。
+(set-code "(define judge-policy (lambda () (list 0.6 0.8 0.5)))") (eval-current)
 
 (define (pd-init! dir)
   (sh (string-append "mkdir -p " dir))

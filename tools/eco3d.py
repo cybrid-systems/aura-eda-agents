@@ -292,7 +292,8 @@ def cmd_verify(a):
     tb, tc = timing(b), timing(c)
     chg = changed_nets(b, c)
     if a.allowed == "*": allowed = None
-    elif a.allowed.startswith("@"): allowed = set(json.load(open(a.allowed[1:])))
+    elif a.allowed.startswith("@"):
+        al = json.load(open(a.allowed[1:])); allowed = set(al["declared"] if isinstance(al, dict) else al)
     else: allowed = set(filter(None, a.allowed.split(",")))
     target = [tuple(v) for v in json.load(open(a.target_file))] if a.target_file else [tuple(v) for v in vb]
     occ = [tuple(p) for p in c["hbt"].values()]

@@ -1,0 +1,25 @@
+;; uses: pd.aura
+;; PD 实验：3 个合成设计 × 种子 × 6 种方法，结果写 results/pd_runs.tsv（合成数据）
+(pd-init! "runs/pd")
+(define *seeds* (map (lambda (s) (string->number s)) (string-split (env-or "PD_SEEDS" "1,2,3,4,5") ",")))
+(define *designs* (string-split (env-or "PD_DESIGNS" "syn-A,syn-B,syn-C") ","))
+(define *methods* (list "default" "random" "autotuner" "greedy" "judge" "judge-norerun"))
+(define out (env-or "PD_OUT" "results/pd_runs.tsv"))
+(write-file out "design\tseed\tmethod\tgr_wns\tdr_wns\tpower\tarea\tevals\tgr_runs\tstage_runs\tcost\tfails\tbranch_FP\tbranch_PL\tbranch_CTS\tbranch_GR\tcommits\trollbacks\toverlay_incumbent_ok\n")
+(for-each
+  (lambda (d)
+    (for-each
+      (lambda (seed)
+        (for-each
+          (lambda (m)
+            (let* ((dir (format "runs/pd/~a/~a/~a" d seed m)) (r (pd-run d m seed dir)) (h (hget r "branch_stage_hist" (list 0 0 0 0)))
+                   (ok (string-contains? (hget r "incumbent_global" "") dir)))
+              (append-line! out (join-strings (map (lambda (x) (format "~a" x))
+                                  (list d seed m (hget r "gr_wns" "") (hget r "dr_wns" "") (hget r "power" "") (hget r "area" "")
+                                        (hget r "evals" "") (hget r "gr_runs" "") (hget r "stage_runs" "") (hget r "cost" "") (hget r "fails" "")
+                                        (list-ref h 0) (list-ref h 1) (list-ref h 2) (list-ref h 3) (hget r "commits" "") (hget r "rollbacks" "") ok)) "\t"))
+              (display (format "~a seed=~a ~a gr=~a dr=~a cost=~a\n" d seed m (hget r "gr_wns" "") (hget r "dr_wns" "") (hget r "cost" "")))))
+          *methods*))
+      *seeds*))
+  *designs*)
+(display "PD-DONE\n")

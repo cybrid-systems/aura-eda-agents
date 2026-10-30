@@ -1,0 +1,51 @@
+;; aura/evolve.aura — Judge 策略的自演化（演化门禁 evolution gate）
+;;
+;; judge-policy 住在 live AST 里（见 pd.aura 的 set-code）。每一步：
+;;   ast:snapshot -> mutate:rebind 一个候选策略 -> 在训练种子上回放（judge 方法，同样 20 次评估预算）
+;;   -> 门禁：平均 GR WNS 提升 ≥ 阈值 且 失败分支数不升 且 成本不升超过 5% -> KEEP
+;;   -> 否则 ast:restore 回到快照（真正把代码回退，不是改一个变量）。
+;; 每步写审计行；最后导出 Aura 自己的 (query :mutation-log)，在保留种子（holdout）上对比初始/演化后策略。
+
+(define (policy-src p) (format "(lambda () (list ~a ~a ~a))" (car p) (cadr p) (caddr p)))
+(define (clamp x lo hi) (max lo (min hi x)))
+
+(define (eval-policy designs seeds tag)   ;; -> (平均 GR WNS, 失败分支总数, 平均成本)
+  (let* ((rs (apply append
+               (map (lambda (d) (map (lambda (s) (pd-run d "judge" s (format "runs/evo/~a/~a/~a" tag d s))) seeds)) designs))))
+    (list (mean (map (lambda (r) (hget r "gr_wns" -1e9)) rs))
+          (sum (map (lambda (r) (hget r "fails" 0)) rs))
+          (mean (map (lambda (r) (hget r "cost" 0)) rs)))))
+
+(define *evo-deltas*   ;; 确定性的候选扰动序列（相对"当前已提交"策略）；最后一个是故意的坏候选
+  (list (list "c_explore+0.4" 0.4 0 0) (list "c_explore-0.4" -0.4 0 0)
+        (list "w_bottleneck+0.6" 0 0.6 0) (list "w_bottleneck-0.6" 0 -0.6 0)
+        (list "w_hist+0.6" 0 0 0.6) (list "w_hist-0.4" 0 0 -0.4)
+        (list "c_explore+0.3,w_bottleneck+0.3" 0.3 0.3 0)
+        (list "纯探索(故意的坏候选)" 3.0 -5.0 -5.0)))
+
+(define (evolve-judge! designs train-seeds audit-path min-gain)
+  (let* ((cur (judge-policy)) (base (eval-policy designs train-seeds "base")) (lines (list)) (step 0))
+    (define (audit! s) (set! lines (cons s lines)))
+    (audit! "step\tchange\tpolicy\twns_before\twns_after\tfails_before\tfails_after\tcost_before\tcost_after\tdecision\treason")
+    (for-each
+      (lambda (dl)
+        (set! step (+ step 1))
+        (let* ((cand (list (clamp (+ (car cur) (cadr dl)) 0 5) (clamp (+ (cadr cur) (caddr dl)) 0 5) (clamp (+ (caddr cur) (list-ref dl 3)) 0 5)))
+               (snap (ast:snapshot (format "evo-pre-~a" step))))
+          (mutate:rebind "judge-policy" (policy-src cand) (format "evo-~a ~a" step (car dl))) (eval-current)
+          (let* ((r (eval-policy designs train-seeds (format "s~a" step)))
+                 (reason (cond ((not (equal? (judge-policy) cand)) "rebind 未生效")
+                               ((> (cadr r) (cadr base)) "失败分支增加")
+                               ((> (caddr r) (* 1.05 (caddr base))) "成本上升超过 5%")
+                               ((< (- (car r) (car base)) min-gain) (format "WNS 提升不足 ~a ps" min-gain))
+                               (else #f))))
+            (if reason
+                (begin (ast:restore snap) (eval-current))
+                #f)
+            (audit! (format "~a\t~a\t~a\t~a\t~a\t~a\t~a\t~a\t~a\t~a\t~a" step (car dl) (policy-src cand) (r2 (car base)) (r2 (car r))
+                            (cadr base) (cadr r) (r2 (caddr base)) (r2 (caddr r)) (if reason "ROLLBACK" "KEEP") (if reason reason "WNS 提升且成本/失败不升")))
+            (display (format "evo step ~a ~a -> ~a (~a)\n" step (car dl) (if reason "ROLLBACK" "KEEP") (judge-policy)))
+            (if reason #f (begin (set! base r) (set! cur cand))))))
+      *evo-deltas*)
+    (write-file audit-path (string-append (join-strings (reverse lines) "\n") "\n"))
+    cur))

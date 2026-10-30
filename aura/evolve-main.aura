@@ -1,0 +1,20 @@
+;; uses: pd.aura evolve.aura
+;; Judge 策略自演化：训练种子 101-103 上演化，保留种子 201-205 上对比（合成数据）
+(pd-init! "runs/evo")
+(define designs (list "syn-A" "syn-B" "syn-C"))
+(define S-init (ast:snapshot "policy-init"))
+(define p0 (judge-policy))
+(define p1 (evolve-judge! designs (list 101 102 103) "results/evolve_audit.tsv" 0.5))
+(define S-final (ast:snapshot "policy-final"))
+(write-file "results/evolve_mutation_log.txt" (format "~a\n" (query :mutation-log)))
+;; 保留集：先回到初始策略（ast:restore 向后），再前滚到演化后的策略（向前 restore，aura#4782 修复的路径）
+(define hold (list 201 202 203 204 205))
+(ast:restore S-init) (eval-current)
+(define h0 (list (judge-policy) (eval-policy designs hold "hold-init")))
+(ast:restore S-final) (eval-current)
+(define h1 (list (judge-policy) (eval-policy designs hold "hold-final")))
+(write-file "results/evolve_holdout.tsv"
+  (format "policy\tsrc\tmean_gr_wns\tfails\tmean_cost\ninitial\t~a\t~a\t~a\t~a\nevolved\t~a\t~a\t~a\t~a\n"
+          (policy-src (car h0)) (r2 (car (cadr h0))) (cadr (cadr h0)) (r2 (caddr (cadr h0)))
+          (policy-src (car h1)) (r2 (car (cadr h1))) (cadr (cadr h1)) (r2 (caddr (cadr h1)))))
+(display (format "EVOLVE-DONE init=~a evolved=~a\n" p0 p1))

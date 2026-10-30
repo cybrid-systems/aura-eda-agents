@@ -1,0 +1,220 @@
+;; aura/eco.aura — AgenticECO 式"证据门控"ECO 修复的 Aura 原型（环境是合成的 tools/eco3d.py）
+;;
+;;  * 专家（netlist / layout_vpix / hb_graph / drc）各在一个 fiber 里运行，fiber 进入 COW overlay 且总是 rollback：
+;;    构造上只读——它们只能产出证据，不能改任何共享状态；
+;;  * 证据是带类型和出处（provenance：工具命令、检查点 sha256、查询）的记录；出处缺失或检查点哈希对不上的证据被拒收；
+;;  * 编排器把证据编译成确定性程序 g（reroute-only -> 单点移动 -> 成组移动 -> 升级重布 -> 区域铺开），
+;;    候选在各自 fiber 的 overlay 里执行 + 独立验证器验证，只有验证通过的最优候选 overlay-commit（排序：剩余 DRC，再 Δnet）；
+;;  * 所有动作写进哈希链账本（sha256，tools/ledger_check.py 独立复核）。
+
+(define *eco-budget* (string->number (env-or "ECO_BUDGET" "12")))   ;; 每个案例的执行器调用上限（本仓库设定）
+(define eco-current "none")   ;; 已提交的当前检查点；只能经由验证通过的候选 overlay-commit 改变
+
+;; ---- 小工具 ----
+(define (jstr s) (string-append "\"" s "\""))
+(define (jlist xs) (string-append "[" (join-strings xs ",") "]"))
+(define (jpairs ps) (jlist (map (lambda (p) (jlist (map jstr p))) ps)))
+(define (file-sha path)
+  (run! (string-append "sha256sum " path " | cut -c1-64 > " path ".sha"))
+  (substring (read-file (string-append path ".sha")) 0 64))
+(define (esc s)   ;; 账本 data 字段：去掉引号/反斜杠/换行，保持 JSON 简单
+  (list->string (map (lambda (ch) (if (or (char=? ch #\") (char=? ch #\\) (char=? ch #\newline)) #\' ch)) (string->list s))))
+
+;; ---- 哈希链账本 ----
+(define (ledger-make path) (let ((L (hash))) (sh (string-append "rm -f " path)) (hash-set! L "path" path) (hash-set! L "prev" (make-string 64 #\0)) (hash-set! L "seq" 0) L))
+(define (ledger! L event data)
+  (let* ((d (esc data)) (seq (hash-ref L "seq")) (prev (hash-ref L "prev"))
+         (tmp (string-append (hash-ref L "path") ".body")))
+    (write-file tmp (format "~a|~a|~a|~a" prev seq event d))
+    (let ((h (file-sha tmp)))
+      (append-line! (hash-ref L "path") (format "{\"seq\": ~a, \"event\": ~a, \"data\": ~a, \"prev\": ~a, \"hash\": ~a}" seq (jstr event) (jstr d) (jstr prev) (jstr h)))
+      (hash-set! L "prev" h) (hash-set! L "seq" (+ seq 1)) h)))
+
+;; ---- 专家：只读 fiber ----
+(define *experts* (list "drc" "netlist" "hb_graph" "layout_vpix"))
+(define (expert-cmd ck kind out) (string-append *py* " tools/eco3d.py query --ckpt " ck " --kind " kind " --out " out))
+(define (run-experts! ck dir tag kinds)
+  (let* ((ch (channel:create 8))
+         (fs (map (lambda (kind)
+                    (let ((out (format "~a/ev-~a-~a.json" dir tag kind)))
+                      (spawn-reporting ch kind
+                        (lambda ()
+                          (let ((kind kind) (out out) (ck ck))
+                            (fiber:overlay-begin)                                ;; 专家在 overlay 里…
+                            (fiber:overlay-define "eco-current" "expert-was-here") ;; …就算它写了共享名字…
+                            (run-bg! (expert-cmd ck kind out) (string-append out ".done"))
+                            (await-file (string-append out ".done"))
+                            (fiber:overlay-rollback)                             ;; …也总被丢弃：构造上只读
+                            (list kind out (expert-cmd ck kind out)))))))
+                  kinds))
+         (outs (map (lambda (f) (channel:recv ch)) fs)))
+    (for-each fiber:join fs)
+    outs))
+
+;; 证据记录：kind / claim / data / provenance。admit-evidence 只收出处完整、且检查点哈希与当前一致的记录。
+(define (make-evidence kind data prov claim)
+  (let ((e (hash))) (hash-set! e "kind" kind) (hash-set! e "data" data) (hash-set! e "provenance" prov) (hash-set! e "claim" claim) e))
+(define (admit-evidence e cur-sha)
+  (let ((p (hget e "provenance" #f)))
+    (cond ((not (hash? p)) "缺少 provenance")
+          ((not (string? (hget p "tool" #f))) "provenance 缺少工具命令")
+          ((not (equal? (hget p "ckpt_sha256" "") cur-sha)) "证据不是针对当前检查点的（哈希不符）")
+          (else #f))))
+(define (collect-evidence! E ck dir tag)
+  (let* ((cur-sha (file-sha ck)) (ev (hash)))
+    (for-each
+      (lambda (o)
+        (let* ((kind (car o)) (j (read-json (cadr o)))   ;; 主 fiber 解析（aura#4788）
+               (prov (hash)))
+          (hash-set! prov "tool" (caddr o)) (hash-set! prov "ckpt_sha256" (hget j "ckpt_sha256" "")) (hash-set! prov "query" kind)
+          (let* ((e (make-evidence kind (hget j "data" #f) prov (format "~a@~a" kind (substring cur-sha 0 12))))
+                 (why (admit-evidence e cur-sha)))
+            (if why
+                (ledger! (hget E "ledger" #f) "fanout.diagnose" (format "REJECT ~a: ~a" kind why))
+                (begin (hash-set! ev kind e)
+                       (ledger! (hget E "ledger" #f) "fanout.diagnose" (format "ADMIT ~a sha=~a" kind (substring cur-sha 0 16))))))))
+      (run-experts! ck dir tag (hget E "experts" *experts*)))
+    ev))
+(define (ev-data ev kind) (hget (hget ev kind #f) "data" #f))
+
+;; ---- 程序 g 的生成（规划）----
+(define (net-clock? ev n) (hget (hget (ev-data ev "netlist") n #f) "clock" #f))
+(define (comp-nets ev comp) (filter (lambda (n) (not (net-clock? ev n))) comp))
+(define (by-degree ev nets use-graph)
+  (if use-graph
+      (list-sort (lambda (a b) (let ((da (hget (hget (ev-data ev "hb_graph") "degree" #f) a 0)) (db (hget (hget (ev-data ev "hb_graph") "degree" #f) b 0)))
+                                 (or (> da db) (and (= da db) (string<? a b)))))
+                 nets)
+      (list-sort string<? nets)))
+(define (legal-sites ev n) (hget (hget (ev-data ev "layout_vpix") n #f) "legal_sites" (list)))
+(define (site-of s) (hget s "site" (list 0 0)))
+(define (site-json s) (jlist (map number->string (site-of s))))
+(define (far? a b) (let ((dx (- (car a) (car b))) (dy (- (cadr a) (cadr b)))) (>= (+ (* dx dx) (* dy dy)) 2.25)))
+
+(define (gen-programs ev comp flags)   ;; -> list of (label json)
+  (let* ((nets (comp-nets ev comp)) (use-graph (not (member "no-hbgraph" flags))) (eco (not (member "no-ecoroute" flags)))
+         (ord (by-degree ev nets use-graph))
+         (mv (lambda (n s) (format "[~a,~a]" (jstr n) (site-json s))))
+         (reroute (lambda (k) (list (format "reroute k=~a" k) (format "{\"family\":\"reroute\",\"k\":~a,\"nets\":~a}" k (jlist (map jstr nets))))))
+         (singles (apply append (map (lambda (n) (map (lambda (s) (list (format "move ~a->~a" n (site-of s)) (format "{\"family\":\"move\",\"moves\":[~a]}" (mv n s))))
+                                                      (take (legal-sites ev n) 2)))
+                                     (take ord 2))))
+         (tuple (if (>= (length ord) 2)
+                    (let* ((a (car ord)) (b (cadr ord)) (sa (legal-sites ev a))
+                           (sb (if (null? sa) (list) (filter (lambda (s) (far? (site-of s) (site-of (car sa)))) (legal-sites ev b)))))
+                      (if (or (null? sa) (null? sb)) (list)
+                          (list (list (format "tuple ~a,~a" a b) (format "{\"family\":\"tuple\",\"moves\":[~a,~a]}" (mv a (car sa)) (mv b (car sb)))))))
+                    (list)))
+         (bbox (let ((ps (filter (lambda (p) p) (map (lambda (n) (hget (hget (ev-data ev "layout_vpix") n #f) "hbt" #f)) nets))))
+                 (if (null? ps) #f (list (- (foldl min 9999 (map car ps)) 2) (- (foldl min 9999 (map cadr ps)) 2)
+                                         (+ (foldl max -1 (map car ps)) 2) (+ (foldl max -1 (map cadr ps)) 2)))))
+         (spread (if bbox (list (list "spread" (format "{\"family\":\"spread\",\"window\":~a}" (jlist (map number->string bbox))))) (list))))
+    (if (null? nets) (list)
+        (append (if eco (list (reroute 0)) (list)) singles tuple
+                (if eco (list (reroute 1) (reroute 2) (reroute 3)) (list)) spread))))
+
+;; ---- 候选执行：fiber + overlay，apply + verify 一条后台命令 ----
+(define (cand-cmd cur pre prog-file target-file)
+  (string-append *py* " tools/eco3d.py apply --ckpt " cur " --program " prog-file " --out " pre ".ckpt.json --report " pre ".report.json && "
+                 *py* " tools/eco3d.py verify --before " cur " --after " pre ".ckpt.json --allowed @" pre ".report.json --target-file " target-file " --out " pre ".verify.json"))
+
+(define (run-candidates! E cur cands target-file)   ;; -> list of (label pre verify-hash)；只有胜出者 commit
+  (let* ((dir (hget E "dir" ".")) (res (channel:create 8)) (fin (channel:create 8))
+         (pres (map (lambda (c) (let ((i (hget E "calls" 0))) (hash-set! E "calls" (+ i 1)) (format "~a/c~a" dir i))) cands))
+         (verdicts (map (lambda (c) (channel:create 1)) cands))
+         (_ (for-each (lambda (k) (write-file (string-append (list-ref pres k) ".g.json") (cadr (list-ref cands k)))
+                                 (ledger! (hget E "ledger" #f) "plan.action_sel" (format "~a g=~a" (car (list-ref cands k)) (cadr (list-ref cands k)))))
+                      (range (length cands))))
+         (fs (map (lambda (k)
+                    (let ((pre (list-ref pres k)) (vch (list-ref verdicts k)))
+                      (spawn-reporting fin k
+                        (lambda ()
+                          (let ((pre pre) (vch vch) (k k) (res res) (cur cur) (target-file target-file))
+                            (fiber:overlay-begin)
+                            (run-bg! (cand-cmd cur pre (string-append pre ".g.json") target-file) (string-append pre ".done"))
+                            (await-file (string-append pre ".done"))
+                            (fiber:overlay-define "eco-current" (string-append pre ".ckpt.json"))
+                            (channel:send res k)
+                            (if (equal? (channel:recv vch) "commit")
+                                (begin (fiber:overlay-commit) "commit")
+                                (begin (fiber:overlay-rollback) "rollback")))))))
+                  (range (length cands))))
+         (_2 (for-each (lambda (f) (channel:recv res)) fs))
+         (rs (map (lambda (k) (let* ((pre (list-ref pres k))
+                                     (v (safe (lambda () (read-json (string-append pre ".verify.json"))) #f)))
+                                (ledger! (hget E "ledger" #f) "execute.completed" (format "~a ~a" (car (list-ref cands k)) pre))
+                                (ledger! (hget E "ledger" #f) "fanout.verify"
+                                         (if v (format "~a pass=~a drc ~a->~a dnet=~a" (car (list-ref cands k)) (hget v "pass" #f) (hget v "drc_before" "") (hget v "drc_after" "") (hget v "delta_nets" ""))
+                                             (format "~a no-verify-output" (car (list-ref cands k)))))
+                                (list (car (list-ref cands k)) pre v)))
+                  (range (length cands)))))
+    rs))
+
+(define (cand-pass? r) (and (caddr r) (hget (caddr r) "pass" #f)))
+(define (cand-improved? r cur-drc)   ;; "improved-verified"：除目标未清零外所有门都过，且 DRC 下降
+  (let ((v (caddr r)))
+    (and v (< (hget v "drc_after" 1e9) cur-drc)
+         (let ((g (hget v "gates" #f)))
+           (and (hget g "routing" #f) (hget g "drc_no_new" #f) (hget g "timing_max" #f) (hget g "timing_min" #f)
+                (hget g "structural_eq" #f) (hget g "preservation" #f))))))
+(define (cand-rank a b)   ;; a ≺ b：先比剩余 DRC c(a)，再比扰动 o(a)=Δnet
+  (let ((va (caddr a)) (vb (caddr b)))
+    (or (< (hget va "drc_after" 1e9) (hget vb "drc_after" 1e9))
+        (and (= (hget va "drc_after" 1e9) (hget vb "drc_after" 1e9)) (< (hget va "delta_nets" 1e9) (hget vb "delta_nets" 1e9))))))
+
+;; ---- 主循环：Query -> Plan -> Execute+Verify -> Advance / Revise ----
+(define (eco-repair case-ckpt dir flags)
+  (sh (string-append "rm -rf " dir " && mkdir -p " dir))
+  (let* ((E (hash)) (L (ledger-make (string-append dir "/ledger.jsonl"))) (cur case-ckpt) (step 0) (stuck (list)))
+    (hash-set! E "dir" dir) (hash-set! E "ledger" L) (hash-set! E "calls" 0)
+    (hash-set! E "experts" (if (member "no-hbgraph" flags) (list "drc" "netlist" "layout_vpix") *experts*))
+    (set! eco-current case-ckpt)
+    (ledger! L "observe" (format "case=~a flags=~a budget=~a" case-ckpt flags *eco-budget*))
+    (let loop ()
+      (set! step (+ step 1))
+      (let* ((ev (collect-evidence! E cur dir (format "q~a" step)))
+             (viol (hget (ev-data ev "drc") "violations" (list)))
+             (comps (if (member "no-hbgraph" flags)
+                        viol   ;; 没有 hb_graph：只能逐个违例对处理
+                        (hget (ev-data ev "hb_graph") "components" (list))))
+             (todo (filter (lambda (cp) (not (member (join-strings cp ",") stuck))) comps)))
+        (if (or (null? todo) (>= (hget E "calls" 0) *eco-budget*))
+            #f
+            (let* ((comp (car (list-sort (lambda (a b) (> (length a) (length b))) todo)))
+                   (target (filter (lambda (v) (and (member (car v) comp) (member (cadr v) comp))) viol))
+                   (tfile (format "~a/t~a.json" dir step))
+                   (progs (gen-programs ev comp flags))
+                   (cur-drc (length viol)))
+              (write-file tfile (jpairs target))
+              (ledger! L "algorithm.exec" (format "component=~a targets=~a programs=~a" comp (length target) (length progs)))
+              (let try-batches ((ps progs) (best-improved #f))
+                (let ((room (- *eco-budget* (hget E "calls" 0))))
+                  (if (or (null? ps) (<= room 0)
+                          (and (member "no-revise" flags) (not (equal? ps progs))))
+                      ;; 本组件没清零：如果有 improved-verified 的候选就提交它，否则把组件记为卡住
+                      (begin
+                        (ledger! L "reflect" (format "component ~a not cleared; improved=~a" comp (if best-improved (car best-improved) "none")))
+                        (if best-improved
+                            (begin (set! cur (string-append (cadr best-improved) ".ckpt.json")) (set! eco-current cur)
+                                   (ledger! L "decide" (format "COMMIT improved-verified ~a" (car best-improved))))
+                            #f)
+                        (set! stuck (cons (join-strings comp ",") stuck))
+                        (loop))
+                      (let* ((batch (take ps (min 2 room)))
+                             (rs (run-candidates! E cur batch tfile))
+                             (passed (list-sort cand-rank (filter cand-pass? rs)))
+                             (impr (list-sort cand-rank (filter (lambda (r) (cand-improved? r cur-drc)) rs)))
+                             (win (if (null? passed) #f (car passed))))
+                        (if win
+                            (begin
+                              (set! cur (string-append (cadr win) ".ckpt.json"))
+                              (set! eco-current cur)
+                              (ledger! L "decide" (format "COMMIT ~a drc->~a dnet=~a" (car win) (hget (caddr win) "drc_after" "") (hget (caddr win) "delta_nets" "")))
+                              (loop))   ;; Advance：重新 Query 当前检查点
+                            (begin
+                              (ledger! L "decide" (format "ROLLBACK ~a" (map car rs)))
+                              (ledger! L "reflect" (format "Revise: ~a" (map (lambda (r) (if (caddr r) (filter (lambda (k) (not (hget (hget (caddr r) "gates" #f) k #t))) (list "routing" "drc_no_new" "drc_target_cleared" "timing_max" "timing_min" "structural_eq" "preservation")) "no-output")) rs)))
+                              (try-batches (list-tail ps (length batch))
+                                           (if (and (not best-improved) (not (null? impr))) (car impr) best-improved)))))))))))))
+    (ledger! L "seal" (format "final=~a calls=~a" cur (hget E "calls" 0)))
+    (list cur (hget E "calls" 0) eco-current)))
