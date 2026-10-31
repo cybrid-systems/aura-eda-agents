@@ -103,20 +103,41 @@ def ensure_container():
                     "sleep", "infinity"], check=True, capture_output=True)
 
 
+def run_in_container(cmd, log):
+    """在 ORFS 容器里执行 bash 命令，输出追加到 log，返回退出码。
+
+    宿主机有 docker 时直接 docker exec；在 Aura 开发容器里（没有 docker）则设 ORFS_EXEC=bridge，
+    把命令写进 ORFS_WORK/queue/，由宿主机上的 bridge.py 代为执行（同一时间只执行一个）。"""
+    if os.environ.get("ORFS_EXEC") == "bridge":
+        q = os.path.join(WORK, "queue"); os.makedirs(q, exist_ok=True)
+        jid = "%d-%d-%s" % (time.time() * 1e6, os.getpid(), hashlib.sha1(cmd.encode()).hexdigest()[:8])
+        tmp = os.path.join(q, jid + ".tmp")
+        json.dump({"cmd": cmd, "log": os.path.abspath(log)}, open(tmp, "w"))
+        os.rename(tmp, os.path.join(q, jid + ".job"))
+        done = os.path.join(q, jid + ".done")
+        while not os.path.exists(done):
+            time.sleep(0.5)
+        rc = int(open(done).read().strip()); os.remove(done)
+        return rc
+    ensure_container()
+    with open(log, "a") as f:
+        return subprocess.run(["sudo", "-n", "docker", "exec", CONTAINER, "bash", "-c", cmd],
+                              stdout=f, stderr=subprocess.STDOUT).returncode
+
+
 def make(design, work_home, targets, env, log):
     """在容器里跑一次 ORFS make（持锁：一次只跑一个 flow）。返回 (ok, 秒)。"""
-    ensure_container()
     vs = " ".join("%s=%s" % (k, v) for k, v in sorted(env.items()))
     cmd = ("source ../env.sh >/dev/null 2>&1; make DESIGN_CONFIG=%s WORK_HOME=%s NUM_CORES=%s %s %s"
            % (DESIGNS[design], cpath(work_home), CORES, vs, " ".join(targets)))
     os.makedirs(WORK, exist_ok=True)
     with open(os.path.join(WORK, ".flow.lock"), "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
-        t0 = time.time()
         with open(log, "a") as f:
-            f.write("$ %s\n" % cmd); f.flush()
-            r = subprocess.run(["sudo", "-n", "docker", "exec", CONTAINER, "bash", "-c", cmd], stdout=f, stderr=subprocess.STDOUT)
-        return r.returncode == 0, time.time() - t0
+            f.write("$ %s\n" % cmd)
+        t0 = time.time()
+        rc = run_in_container(cmd, log)
+        return rc == 0, time.time() - t0
 
 
 def sub(work_home, design, kind):
