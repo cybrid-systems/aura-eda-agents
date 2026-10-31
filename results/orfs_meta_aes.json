@@ -1,0 +1,57 @@
+{
+ "backend": "OpenROAD-flow-scripts (real)",
+ "design": "aes",
+ "platform": "nangate45",
+ "design_config": "designs/nangate45/aes/config.mk",
+ "clock_period_ns": 0.82,
+ "image": "openroad/orfs:latest",
+ "image_digest": "openroad/orfs@sha256:cba40c1de21f048b545c005210dabe728bf501f4bb7d5ae5f03b33feb52b49fa",
+ "image_created": "2026-10-30 22:09 UTC+8",
+ "openroad_version": "unknown (image has no version string)",
+ "yosys": "0.68+post",
+ "num_cores": 4,
+ "host": "8 vCPU, 16 GB",
+ "budget": 20,
+ "seeds": [
+  1,
+  2,
+  3
+ ],
+ "width": 2,
+ "space": "v2",
+ "unique_complete_configs": 110,
+ "unique_failing_configs": 0,
+ "default_gr_wns_ps": -22.001,
+ "best_seen_gr_wns_ps": 44.104,
+ "best_seen_knobs": {
+  "CTS": {
+   "cluster": 0
+  },
+  "FP": {
+   "margin": 8,
+   "util": 0
+  },
+  "GR": {
+   "incr": 1,
+   "opt": 1
+  },
+  "PL": {
+   "density": 0.2,
+   "prt": 0,
+   "td": 1
+  }
+ },
+ "configs_better_than_default": 102,
+ "median_seen_gr_wns_ps": 0.5165,
+ "worst_seen_gr_wns_ps": -74.482,
+ "start": "2026-10-31 10:09:53",
+ "end": "2026-10-31 12:39:10",
+ "wall_minutes": 149.28,
+ "notes": [
+  "无失败配置（aes 用固定 FLOORPLAN_DEF，不调利用率）。",
+  "收益几乎全部来自两个旋钮：`SETUP_SLACK_MARGIN`（margin）与 GR 后增量修复（incr）。只改一个旋钮时：margin=3% → +8.957 ps，margin=8% → +32.297 ps，incr=1 → +0.251 ps；margin=8% + incr=1 → +44.104 ps（最好）。",
+  "按 margin×incr 分组的最好 GR WNS：0/0 −8.22，0/1 +0.78，3/0 +16.34，3/1 +24.91，8/0 +32.30，8/1 +44.10 ps。关掉时序驱动布局（td=0）在各组都变差。",
+  "代价：最好配置面积 20814.8 µm²（默认 18832.8，+10.5%），功耗 53.57 mW（默认 47.27，+13.3%）。目标函数只看 WNS，没有约束面积/功耗。",
+  "finish 后 WNS 与 GR 后基本同向：最好配置 finish +44.361 ps（默认 −15.331 ps）；但类 AutoTuner 种子 1/2 的 incumbent（GR +31.4）finish 只有 +18.857 ps。"
+ ]
+}

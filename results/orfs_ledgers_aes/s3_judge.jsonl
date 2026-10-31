@@ -1,0 +1,53 @@
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b0/FP.json", "cost": 12.005, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b0/PL.json", "cost": 27.01, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b0/CTS.json", "cost": 6.503, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b0/GR.json", "cost": 16.506, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b1/FP.json", "cost": 12.505, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b1/PL.json", "cost": 27.01, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b1/CTS.json", "cost": 7.505, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.003}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b1/GR.json", "cost": 18.007, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b2/PL.json", "cost": 26.51, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b2/CTS.json", "cost": 6.503, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b2/GR.json", "cost": 17.007, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b3/PL.json", "cost": 27.013, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b3/CTS.json", "cost": 7.003, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b3/GR.json", "cost": 17.512, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b4/CTS.json", "cost": 6.003, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL"], "stage": "CTS", "wall": 0.01}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b4/GR.json", "cost": 18.011, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL"], "stage": "GR", "wall": 0.006}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b5/PL.json", "cost": 27.01, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.009}
+{"cached": false, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b5/CTS.json", "cost": 8.505, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 8.507}
+{"cached": false, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b5/GR.json", "cost": 19.037, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 19.039}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b6/FP.json", "cost": 14.005, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b6/PL.json", "cost": 29.021, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b6/CTS.json", "cost": 45.028, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b6/GR.json", "cost": 20.008, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b7/PL.json", "cost": 26.518, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b7/CTS.json", "cost": 46.02, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b7/GR.json", "cost": 20.521, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b8/FP.json", "cost": 12.505, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b8/PL.json", "cost": 27.013, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b8/CTS.json", "cost": 7.003, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b8/GR.json", "cost": 17.512, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b9/GR.json", "cost": 62.547, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 0.005}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b10/GR.json", "cost": 22.51, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 0.009}
+{"cached": false, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b11/GR.json", "cost": 68.068, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 68.07}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b12/GR.json", "cost": 17.512, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b13/PL.json", "cost": 29.021, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.003}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b13/CTS.json", "cost": 45.028, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b13/GR.json", "cost": 58.522, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.006}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b14/GR.json", "cost": 62.547, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b15/PL.json", "cost": 16.51, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.028}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b15/CTS.json", "cost": 42.526, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.003}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b15/GR.json", "cost": 99.059, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.007}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b16/PL.json", "cost": 29.021, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b16/CTS.json", "cost": 45.028, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b16/GR.json", "cost": 58.526, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b17/PL.json", "cost": 29.021, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b17/CTS.json", "cost": 45.028, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b17/GR.json", "cost": 58.522, "design": "aes-nangate45", "ok": true, "reused": ["FP"], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b18/FP.json", "cost": 12.505, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b18/PL.json", "cost": 27.013, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b18/CTS.json", "cost": 7.003, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b18/GR.json", "cost": 22.51, "design": "aes-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b19/GR.json", "cost": 58.526, "design": "aes-nangate45", "ok": true, "reused": ["FP", "PL", "CTS"], "stage": "GR", "wall": 0.003}
+{"cached": false, "ckpt": "/workspace/aura-eda-agents/runs/pd/aes-nangate45/3/judge/b11/GR.json", "cost": 306.036, "ok": true, "stage": "DR", "wall": 306.049}
