@@ -1,2 +1,3 @@
 design	seed	method	gr_wns	dr_wns	power	area	evals	gr_runs	stage_runs	cost	fails	branch_FP	branch_PL	branch_CTS	branch_GR	commits	rollbacks	overlay_incumbent_ok
 ibex-nangate45	1	default	15.727	-14.27	12.7863	29017.9	1	1	4	293.25	0	0	0	0	0	1	0	#t
+ibex-nangate45	1	random	165.846	145.369	13.3297	30907.1	20	20	80	2346.74	0	0	0	0	0	3	17	#t
