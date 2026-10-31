@@ -93,12 +93,14 @@ flowchart TB
 | Aura 运行时原语（fiber、overlay commit/rollback、ast:snapshot/restore、mutate:rebind、mutation-log） | **真实**：在 Aura main（5af7fd023）上实际运行，`tests/aura/core.aura` 断言了这些性质 |
 | 编排逻辑（树搜索、分支复用、证据出处、验证门控提交、哈希链账本、演化门禁） | **真实**：Aura 代码，可运行 |
 | Judge / stage agent / 规划器的"智能" | **模拟**：确定性启发式策略，**没有 LLM**。论文中这些都是 LLM |
-| PD 流程（FP/PL/CTS/GR/DR）与 QoR | **两套后端**：<br>- **真实**：`adapters/openroad/backend.py` 逐阶段调用 ORFS（官方镜像 openroad/orfs，设计 gcd/nangate45）。每阶段 .odb 作为检查点供分支复用；WNS/TNS/功耗/面积取自 ORFS 指标 JSON；成本为实测秒数。<br>- **模拟**：`tools/pdsim.py` 的解析式模型，阶段成本为假设值 |
+| PD 流程（FP/PL/CTS/GR/DR）与 QoR | **两套后端**：<br>- **真实**：`adapters/openroad/backend.py` 逐阶段调用 ORFS（官方镜像 openroad/orfs，设计 gcd / aes / ibex，平台 nangate45）。每阶段 .odb 作为检查点供分支复用；WNS/TNS/功耗/面积取自 ORFS 指标 JSON；成本为实测秒数。<br>- **模拟**：`tools/pdsim.py` 的解析式模型，阶段成本为假设值 |
 | 3D-IC HBT 布局、DRC、时序、结构等价 | **模拟**：`tools/eco3d.py` 的网格模型 |
 | OpenROAD/ORFS 接入 | **PD 已实现**：`tests/test_orfs.py` 验证 ORFS 的确定性，以及“检查点复用 = 全量重跑”。<br>**ECO 未接入**：开源流程里没有混合键合 3D-IC 设计与缺陷，论文引擎 TaiWei 与缺陷案例也取不到，原因见 [docs/eco-real.md](docs/eco-real.md) |
 | 论文数字 | 只在 `docs/papers.md` 中引用，本仓库**没有**复现 |
 
 ## 结果（真实 ORFS）
+
+### gcd / nangate45，旋钮空间 v1（Phase 2）
 
 完整表格见 [results/summary_orfs.md](results/summary_orfs.md)，可用 `python3 tools/summarize_orfs.py` 重新生成。
 
@@ -135,6 +137,55 @@ flowchart TB
   - 缓存键为（阶段，上游全部旋钮）。ORFS 的确定性已由测试验证。
   - 总墙钟 56.4 分钟。
 - 统计意义有限：只有 1 个设计、3 个种子。Judge 是确定性启发式，不是 LLM。
+
+### aes / nangate45，面向时序的旋钮空间 v2（Phase 3）
+
+完整表格见 [results/summary_orfs_aes.md](results/summary_orfs_aes.md)，可用 `python3 tools/summarize_orfs.py --tag aes` 重新生成。
+
+**设置**：
+- 设计：ORFS 自带的 aes（aes_cipher_top）/ nangate45，官方 SDC，时钟周期 0.82 ns。官方配置用固定 floorplan DEF，并关闭了 GR 后增量修复。
+- 镜像与 Phase 2 相同；`NUM_CORES=4`，一次只跑一个 flow。
+- v2 旋钮（见 [adapters/openroad/README.md](adapters/openroad/README.md)）：
+  - 修复余量 `SETUP_SLACK_MARGIN`，取时钟周期的 0/3/8%；
+  - 布局密度、时序驱动布局、放置后修复；
+  - CTS 簇大小；
+  - GR 后增量修复、`OPT_POST_GRT_WNS`。
+  
+  默认组合 = 官方配置。
+- 运行规模：3 个种子 × 6 种方法，每次预算 20 次到 GR 的评估。v2 的确定性和复用等价已用 `tests/test_orfs.py` 在 aes 上核对。
+
+| 方法 | 平均 GR WNS (ps) | 平均 finish WNS (ps) | 平均面积 (µm²) | 平均阶段执行数 | 平均成本（实测秒） |
+|---|---|---|---|---|---|
+| ORFS 默认配置 | −22.001 | −15.331 | 18832.8 | 4.0 | 258 |
+| 扁平随机 | 40.143 | 38.052 | 20619.1 | 80.0 | 2194 |
+| 类 AutoTuner 扁平局部搜索 | 35.636 | 27.358 | 20436.7 | 80.0 | 2201 |
+| 最大瓶颈贪心（复用） | **40.168** | **38.052** | 20619.1 | 61.7 | 1793 |
+| 历史感知 Judge（复用） | 33.451 | 30.424 | 20357.6 | **57.0** | **1716** |
+| 同一 Judge，不复用 | 33.451 | 30.424 | 20357.6 | 80.0 | 2178 |
+
+- **在 aes 上，所有搜索方法都明显优于 ORFS 默认配置**：
+  - 默认 GR 后 WNS 为 −22.0 ps，finish 后为 −15.3 ps，有时序违例。
+  - 各方法的平均 GR 后 WNS 在 +33 到 +40 ps 之间，finish 后在 +27 到 +38 ps 之间。
+  - 110 个不同配置中，102 个优于默认；没有失败的配置。
+  - 最好的配置是 GR +44.104 ps、finish +44.361 ps，有 4 次运行找到了它。
+- **收益来自哪里**：几乎全部来自两个旋钮。只改一个旋钮时：
+  - margin=3% 得到 +9.0 ps，margin=8% 得到 +32.3 ps；
+  - 打开增量修复（incr=1）得到 +0.3 ps；
+  - 两者叠加（margin=8% 加 incr=1）得到 +44.1 ps。
+  
+  关闭时序驱动布局在各组里都变差。
+- **代价**：最好配置面积 +10.5%（20814.8 vs 18832.8 µm²），功耗 +13.3%（53.57 vs 47.27 mW）。目标只看 WNS，没有约束面积和功耗。如果加上这两项约束，结论可能不同。
+- **方法间比较（如实报告）**：
+  - 在 aes 上，扁平随机和最大瓶颈贪心的平均 WNS（约 40.1 ps）高于历史感知 Judge（33.5 ps）。这和 gcd 以及合成环境上的观察一致，与论文的结论相反。
+  - 历史感知 Judge 的分支有 53% 落在 PL。真正有杠杆的 margin 在 FP，Judge 在 FP 上分得不够。
+  - 3 个种子的样本太少，以上不构成统计结论。
+- **复用的收益是真实的**：
+  - Judge 复用与不复用得到相同的 incumbent（3/3）；
+  - 阶段执行数 57.0 vs 80.0，实测成本 1716 s vs 2178 s（−21%）。
+- **计算量**：
+  - 逻辑阶段执行 1106 次，真正调用 ORFS 220 次（实测 148.3 分钟），其余命中缓存；
+  - 总墙钟 149.3 分钟（10:09:53 → 12:39:10，UTC+8）。
+- **finish 与 GR 并不总是一致**：类 AutoTuner 在种子 1、2 上的 incumbent GR 是 +31.4 ps，finish 只有 +18.9 ps。只用 GR 指标挑 incumbent 有偏差。
 
 ## 结果（合成）
 
@@ -180,12 +231,15 @@ flowchart TB
 ## 路线图
 
 1. **轻集成（当前）**：Aura 作为编排层，EDA 工具作为子进程。状态的载体是检查点文件 + overlay 里的全局绑定。
-   - 已完成：`adapters/openroad` 接入 ORFS（gcd/nangate45）。
+   - 已完成：
+     - `adapters/openroad` 接入 ORFS：gcd、aes、ibex，平台 nangate45；
+     - v2 时序旋钮：修复余量、放置后修复、密度、增量修复等。在 aes 上搜索明显优于默认。
    - 下一步：
-     - 换更大的设计（如 aes、ibex，sky130hd / asap7）；
-     - 加入对时序更有杠杆的旋钮，例如时钟周期余量、repair_timing 参数、布局密度；
+     - 平台扩展到 sky130hd / asap7；
+     - 把面积和功耗约束加入目标；
+     - 用 finish 指标校准 GR 指标；
      - 跨设计复用缓存。
-   - 接入 LLM 作为 Judge / stage agent / 规划器，与确定性策略对照。
+   - 接入 LLM 作为 Judge / stage agent / 规划器，与确定性策略对照。可插拔的 LLM Judge 接口已经就绪（[docs/llm-judge.md](docs/llm-judge.md)，提供方 minimax / glm / deepseek），还没有用真实 LLM 跑实验。
 2. **状态集成**：把检查点元数据、证据、账本作为 Aura 一等值放进 overlay / worldline，fork 分支时零拷贝共享上游。
    - 让 `ast:snapshot` 同时覆盖策略和搜索树。
    - 让账本复用 Aura 自己的 mutation 审计 WAL。
