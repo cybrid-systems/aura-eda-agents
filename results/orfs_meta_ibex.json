@@ -17,5 +17,33 @@
  "seeds": [
   1,
   2
- ]
+ ],
+ "unique_complete_configs": 98,
+ "unique_failing_configs": 0,
+ "default_gr_wns_ps": 15.727,
+ "best_seen_gr_wns_ps": 176.072,
+ "best_seen_knobs": {
+  "CTS": {
+   "cluster": 10
+  },
+  "FP": {
+   "margin": 8,
+   "util": 10
+  },
+  "GR": {
+   "incr": 1,
+   "opt": 1
+  },
+  "PL": {
+   "density": 0.1,
+   "prt": 0,
+   "td": 1
+  }
+ },
+ "configs_better_than_default": 72,
+ "median_seen_gr_wns_ps": 55.374,
+ "worst_seen_gr_wns_ps": -30.291,
+ "start": "2026-10-31 12:41:17",
+ "end": "2026-10-31 15:35:23",
+ "wall_minutes": 174.1
 }
