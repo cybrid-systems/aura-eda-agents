@@ -28,9 +28,11 @@ PROVIDERS = {
     "minimax": {"kind": "openai", "base_url_env": "MINIMAX_BASE_URL", "base_url": "https://api.minimaxi.com/v1",
                 "key_env": "MINIMAX_API_KEY", "model_env": "MINIMAX_MODEL", "model": "MiniMax-M3.1-Flash"},
     "glm": {"kind": "openai", "base_url_env": "GLM_BASE_URL", "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
-            "key_env": "GLM_API_KEY", "model_env": "GLM_MODEL", "model": "glm-5.3-flash"},
+            "key_env": "GLM_API_KEY", "model_env": "GLM_MODEL", "model": "glm-5.3-flash",
+            "extra": {"thinking": {"type": "disabled"}}},
     "deepseek": {"kind": "openai", "base_url_env": "DEEPSEEK_BASE_URL", "base_url": "https://api.deepseek.com",
-                 "key_env": "DEEPSEEK_API_KEY", "model_env": "DEEPSEEK_MODEL", "model": "deepseek-flash"},
+                 "key_env": "DEEPSEEK_API_KEY", "model_env": "DEEPSEEK_MODEL", "model": "deepseek-flash",
+                 "extra": {"thinking": {"type": "disabled"}}},
     "mock": {"kind": "mock"},
 }
 
@@ -87,6 +89,8 @@ def call_openai(cfg, system, user):
     body = {"model": os.environ.get(cfg["model_env"], cfg["model"]),
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "max_completion_tokens": int(os.environ.get("LLM_JUDGE_MAX_TOKENS", "4000"))}
+    if os.environ.get("LLM_JUDGE_THINKING", "off") == "off":   # 关思考（提供方支持时）；设 on 则保留默认
+        body.update(cfg.get("extra", {}))
     if os.environ.get("LLM_JUDGE_EFFORT"):
         body["reasoning_effort"] = os.environ["LLM_JUDGE_EFFORT"]
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
@@ -166,6 +170,23 @@ def cmd_select(a):
     json.dump({"picks": picks, "source": prov, "fallback": not picks}, open(a.out, "w"))
 
 
+def cmd_smoke(a):
+    """冒烟测试：每个提供方发一个极小请求，检查能返回可解析的 JSON。不输出 key。"""
+    provs = [x for x in a.providers.split(",") if x]
+    ok_all = True
+    for prov in provs:
+        cfg = PROVIDERS[prov]; t0 = time.time()
+        try:
+            text, meta = call_openai(cfg, "只输出 JSON，不要解释。", '输出 {"picks":[{"node":0,"stage":"GR","settings":{},"reason":"smoke"}]}')
+            picks = parse_json(text)
+            print("%-8s OK   model=%s latency=%.1fs picks=%d usage=%s" % (prov, meta["model"], time.time() - t0, len(picks),
+                                                                     json.dumps(meta.get("usage") or {}, ensure_ascii=False)[:160]))
+        except Exception as e:
+            ok_all = False
+            print("%-8s FAIL %s: %s" % (prov, type(e).__name__, e))
+    sys.exit(0 if ok_all else 1)
+
+
 def main():
     p = argparse.ArgumentParser(); sp = p.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("select")
@@ -174,7 +195,11 @@ def main():
     s = sp.add_parser("prompt", help="只打印给定状态下的提示词（不调用任何 API），便于审阅")
     for k in ("dir", "space", "nodes"): s.add_argument("--" + k, required=True)
     s.add_argument("--width", type=int, default=2); s.add_argument("--budget-left", type=int, default=0)
+    s = sp.add_parser("smoke", help="对提供方做最小连通性测试（需 LLM_JUDGE_ALLOW_NETWORK=1）")
+    s.add_argument("--providers", default="minimax,glm,deepseek")
     a = p.parse_args()
+    if a.cmd == "smoke":
+        return cmd_smoke(a)
     if a.cmd == "select":
         try:
             cmd_select(a)
