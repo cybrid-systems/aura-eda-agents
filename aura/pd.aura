@@ -11,9 +11,9 @@
 (define *pd-width* (string->number (env-or "PD_WIDTH" "2")))      ;; 每轮并行分支数
 (define pd-incumbent "none")   ;; 全局 incumbent 检查点；只有被 Judge 批准的分支能在 overlay 里改它并提交
 
-;; Judge 策略参数（c_explore, w_bottleneck, w_hist）。放在 live AST（set-code）里：
+;; Judge 策略参数（c_explore, w_bottleneck, w_hist, w_incumbent）。放在 live AST（set-code）里：
 ;; 演化门禁用 mutate:rebind 改它、ast:restore 回退（见 aura/evolve.aura）。
-(set-code "(define judge-policy (lambda () (list 0.6 0.8 0.5)))") (eval-current)
+(set-code "(define judge-policy (lambda () (list 0.6 0.8 0.5 0.0)))") (eval-current)
 
 (define (pd-init! dir)
   (sh (string-append "mkdir -p " dir))
@@ -156,7 +156,7 @@
 (define (judge-select c mode)   ;; 返回 list of (node b hint)，至多 W 个，各不相同
   (let* ((ok (filter (lambda (m) (not (hget m "fail" #t))) (ctx-get c "nodes")))
          (inc (pd-incumbent-node c))
-         (pol (judge-policy)) (cx (car pol)) (wb (cadr pol)) (wh (caddr pol))
+         (pol (judge-policy)) (cx (car pol)) (wb (cadr pol)) (wh (caddr pol)) (wi (list-ref pol 3))
          (wmin (foldl (lambda (a m) (min a (hget m "wns" 0))) 1e9 ok))
          (wmax (foldl (lambda (a m) (max a (hget m "wns" 0))) -1e9 ok))
          (T (+ 1 (ctx-get c "evals")))
@@ -171,7 +171,8 @@
                           (map (lambda (s)
                                  (let* ((tr (list-ref (ctx-get c "stage-tries") s))
                                         (hs (if (= tr 0) 1.0 (/ (* 1.0 (list-ref (ctx-get c "stage-gains") s)) tr))))
-                                   (list m s (+ q (* cx e) (* wb (/ (pen-gap c m s) gapmax)) (* wh hs)))))
+                                   (list m s (+ q (* cx e) (* wb (/ (pen-gap c m s) gapmax)) (* wh hs)
+                                                (if (eq? m inc) wi 0)))))
                                (range 4))))
                       ok))))
          (sorted (list-sort (lambda (a b) (> (caddr a) (caddr b))) pairs)))

@@ -21,7 +21,7 @@
   (list->string (map (lambda (ch) (if (or (char=? ch #\") (char=? ch #\\) (char=? ch #\newline)) #\' ch)) (string->list s))))
 
 ;; ---- 哈希链账本 ----
-(define (ledger-make path) (let ((L (hash))) (sh (string-append "rm -f " path)) (hash-set! L "path" path) (hash-set! L "prev" (make-string 64 #\0)) (hash-set! L "seq" 0) L))
+(define (ledger-make path) (let ((L (hash))) (sh (string-append "rm -f " path)) (hash-set! L "path" path) (hash-set! L "prev" "0000000000000000000000000000000000000000000000000000000000000000") (hash-set! L "seq" 0) L))
 (define (ledger! L event data)
   (let* ((d (esc data)) (seq (hash-ref L "seq")) (prev (hash-ref L "prev"))
          (tmp (string-append (hash-ref L "path") ".body")))
@@ -118,7 +118,7 @@
   (string-append *py* " tools/eco3d.py apply --ckpt " cur " --program " prog-file " --out " pre ".ckpt.json --report " pre ".report.json && "
                  *py* " tools/eco3d.py verify --before " cur " --after " pre ".ckpt.json --allowed @" pre ".report.json --target-file " target-file " --out " pre ".verify.json"))
 
-(define (run-candidates! E cur cands target-file)   ;; -> list of (label pre verify-hash)；只有胜出者 commit
+(define (run-candidates! E cur cands target-file choose)   ;; -> (rs winner)；choose 从验证结果里挑胜出者，只有它 overlay-commit
   (let* ((dir (hget E "dir" ".")) (res (channel:create 8)) (fin (channel:create 8))
          (pres (map (lambda (c) (let ((i (hget E "calls" 0))) (hash-set! E "calls" (+ i 1)) (format "~a/c~a" dir i))) cands))
          (verdicts (map (lambda (c) (channel:create 1)) cands))
@@ -147,8 +147,19 @@
                                          (if v (format "~a pass=~a drc ~a->~a dnet=~a" (car (list-ref cands k)) (hget v "pass" #f) (hget v "drc_before" "") (hget v "drc_after" "") (hget v "delta_nets" ""))
                                              (format "~a no-verify-output" (car (list-ref cands k)))))
                                 (list (car (list-ref cands k)) pre v)))
-                  (range (length cands)))))
-    rs))
+                  (range (length cands))))
+         (win (choose rs)))
+    (for-each (lambda (k) (channel:send (list-ref verdicts k) (if (and win (equal? (cadr win) (list-ref pres k))) "commit" "rollback")))
+              (range (length cands)))
+    (for-each (lambda (f) (channel:recv fin)) fs)
+    (for-each fiber:join fs)
+    (list rs win)))
+
+;; 事后提交（improved-verified）：同样经由一个 fiber 的 overlay-commit 改共享状态，而不是主线程直接 set!
+(define (commit-via-overlay! path)
+  (let* ((ch (channel:create 1))
+         (f (spawn-reporting ch "late-commit" (lambda () (let ((path path)) (fiber:overlay-begin) (fiber:overlay-define "eco-current" path) (fiber:overlay-commit) "commit")))))
+    (channel:recv ch) (fiber:join f)))
 
 (define (cand-pass? r) (and (caddr r) (hget (caddr r) "pass" #f)))
 (define (cand-improved? r cur-drc)   ;; "improved-verified"：除目标未清零外所有门都过，且 DRC 下降
@@ -168,7 +179,7 @@
   (let* ((E (hash)) (L (ledger-make (string-append dir "/ledger.jsonl"))) (cur case-ckpt) (step 0) (stuck (list)))
     (hash-set! E "dir" dir) (hash-set! E "ledger" L) (hash-set! E "calls" 0)
     (hash-set! E "experts" (if (member "no-hbgraph" flags) (list "drc" "netlist" "layout_vpix") *experts*))
-    (set! eco-current case-ckpt)
+    (commit-via-overlay! case-ckpt)
     (ledger! L "observe" (format "case=~a flags=~a budget=~a" case-ckpt flags *eco-budget*))
     (let loop ()
       (set! step (+ step 1))
@@ -195,26 +206,25 @@
                       (begin
                         (ledger! L "reflect" (format "component ~a not cleared; improved=~a" comp (if best-improved (car best-improved) "none")))
                         (if best-improved
-                            (begin (set! cur (string-append (cadr best-improved) ".ckpt.json")) (set! eco-current cur)
+                            (begin (set! cur (string-append (cadr best-improved) ".ckpt.json")) (commit-via-overlay! cur)
                                    (ledger! L "decide" (format "COMMIT improved-verified ~a" (car best-improved))))
                             #f)
                         (set! stuck (cons (join-strings comp ",") stuck))
                         (loop))
                       (let* ((batch (take ps (min 2 room)))
-                             (rs (run-candidates! E cur batch tfile))
-                             (passed (list-sort cand-rank (filter cand-pass? rs)))
-                             (impr (list-sort cand-rank (filter (lambda (r) (cand-improved? r cur-drc)) rs)))
-                             (win (if (null? passed) #f (car passed))))
+                             (rw (run-candidates! E cur batch tfile
+                                   (lambda (rs) (let ((passed (list-sort cand-rank (filter cand-pass? rs)))) (if (null? passed) #f (car passed))))))
+                             (rs (car rw)) (win (cadr rw))
+                             (impr (list-sort cand-rank (filter (lambda (r) (cand-improved? r cur-drc)) rs))))
                         (if win
                             (begin
-                              (set! cur (string-append (cadr win) ".ckpt.json"))
-                              (set! eco-current cur)
+                              (set! cur (string-append (cadr win) ".ckpt.json"))   ;; eco-current 已由胜出 fiber 的 overlay-commit 更新
                               (ledger! L "decide" (format "COMMIT ~a drc->~a dnet=~a" (car win) (hget (caddr win) "drc_after" "") (hget (caddr win) "delta_nets" "")))
                               (loop))   ;; Advance：重新 Query 当前检查点
                             (begin
                               (ledger! L "decide" (format "ROLLBACK ~a" (map car rs)))
                               (ledger! L "reflect" (format "Revise: ~a" (map (lambda (r) (if (caddr r) (filter (lambda (k) (not (hget (hget (caddr r) "gates" #f) k #t))) (list "routing" "drc_no_new" "drc_target_cleared" "timing_max" "timing_min" "structural_eq" "preservation")) "no-output")) rs)))
                               (try-batches (list-tail ps (length batch))
-                                           (if (and (not best-improved) (not (null? impr))) (car impr) best-improved)))))))))))))
+                                           (if (and (not best-improved) (not (null? impr))) (car impr) best-improved))))))))))))
     (ledger! L "seal" (format "final=~a calls=~a" cur (hget E "calls" 0)))
     (list cur (hget E "calls" 0) eco-current)))

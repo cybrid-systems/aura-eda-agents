@@ -1,0 +1,37 @@
+;; uses: eco.aura
+;; ECO 实验：9 个合成案例 × (不修 / 全量重布 / 库存修复 / 证据门控 Agent 及 3 个消融)，结果写 results/eco_runs.tsv（合成数据）
+;; 注意：string-split 的多字符分隔符只取第一个字符（见 docs/aura-issues.md），这里只用单字符分隔符。
+;; 案例选择规则（固定、可复现）：每个设计取种子 1..15 中前 3 个 5 ≤ DRC ≤ 30 的（见 docs/design.md）
+(define *cases* (map (lambda (s) (string-split s ":")) (string-split (env-or "ECO_CASES" "eco-S:2,eco-S:3,eco-S:5,eco-M:1,eco-M:6,eco-M:7,eco-L:1,eco-L:5,eco-L:11") ",")))
+(define *methods* (string-split (env-or "ECO_METHODS" "none,fullreroute,stockrepair,agent,agent-no-ecoroute,agent-no-hbgraph,agent-no-revise") ","))
+(define out (env-or "ECO_OUT" "results/eco_runs.tsv"))
+(sh "mkdir -p runs/eco/cases")
+(write-file out "case\tmethod\tdrc_before\tdrc_after\tcleared\tdelta_nets\trouted_nets\tclock_changed\ttiming_ok\tstructural_eq\texec_calls\tledger_ok\toverlay_current_ok\n")
+(for-each
+  (lambda (cs)
+    (let* ((d (car cs)) (seed (cadr cs)) (name (format "~a-~a" d seed)) (ck (format "runs/eco/cases/~a.json" name)))
+      (run! (string-append *py* " tools/eco3d.py gen --design " d " --seed " seed " --out " ck))
+      (for-each
+        (lambda (m)
+          (let* ((dir (format "runs/eco/~a/~a" name m))
+                 (res (cond ((equal? m "none") (begin (sh (string-append "mkdir -p " dir)) (list ck 0 ck)))
+                            ((or (equal? m "fullreroute") (equal? m "stockrepair"))
+                             (begin (sh (string-append "mkdir -p " dir))
+                                    (run! (string-append *py* " tools/eco3d.py " m " --ckpt " ck " --out " dir "/final.json"))
+                                    (list (string-append dir "/final.json") 1 (string-append dir "/final.json"))))
+                            (else (eco-repair ck dir (if (equal? m "agent") (list) (list (substring m 6 (string-length m)))))))))
+                 (final (car res)))
+            (run! (string-append *py* " tools/eco3d.py verify --before " ck " --after " final " --allowed '*' --out " dir "/final.verify.json"))
+            (let* ((v (read-json (string-append dir "/final.verify.json"))) (g (hget v "gates" #f))
+                   (st (begin (run! (string-append *py* " tools/eco3d.py stats --before " ck " --after " final " --out " dir "/final.stats.json"))
+                              (read-json (string-append dir "/final.stats.json"))))
+                   (lok (if (string-contains? m "agent") (= 0 (sh (string-append *py* " tools/ledger_check.py " dir "/ledger.jsonl > " dir "/ledger.check"))) "-")))
+              (append-line! out (join-strings (map (lambda (x) (format "~a" x))
+                (list name m (hget v "drc_before" "") (hget v "drc_after" "") (if (= 0 (hget v "drc_after" 1)) 1 0) (hget v "delta_nets" "")
+                      (hget st "routed_nets" "") (length (hget v "clock_changed" (list)))
+                      (if (and (hget g "timing_max" #f) (hget g "timing_min" #f)) 1 0) (if (hget g "structural_eq" #f) 1 0)
+                      (cadr res) lok (equal? (caddr res) final))) "\t"))
+              (display (format "~a ~a drc ~a->~a dnet=~a clk=~a calls=~a\n" name m (hget v "drc_before" "") (hget v "drc_after" "") (hget v "delta_nets" "") (length (hget v "clock_changed" (list))) (cadr res))))))
+        *methods*)))
+  *cases*)
+(display "ECO-DONE\n")
