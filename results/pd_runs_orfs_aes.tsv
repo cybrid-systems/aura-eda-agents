@@ -1,0 +1,8 @@
+design	seed	method	gr_wns	dr_wns	power	area	evals	gr_runs	stage_runs	cost	fails	branch_FP	branch_PL	branch_CTS	branch_GR	commits	rollbacks	overlay_incumbent_ok
+aes-nangate45	1	default	-22.001	-15.331	47.2732	18832.8	1	1	4	257.6	0	0	0	0	0	1	0	#t
+aes-nangate45	1	random	44.029	44.361	53.5716	20814.8	20	20	80	2123.55	0	0	0	0	0	3	17	#t
+aes-nangate45	1	autotuner	31.4	18.857	51.5856	20247.7	20	20	80	2066.55	0	0	0	0	0	3	17	#t
+aes-nangate45	1	greedy	44.104	44.361	53.5717	20814.8	20	20	60	1842.01	0	5	10	2	2	4	16	#t
+aes-nangate45	1	judge	30.014	17.853	51.0288	20063.6	20	20	63	1528.24	0	5	12	1	1	4	16	#t
+aes-nangate45	1	judge-norerun	30.014	17.853	51.0288	20063.6	20	20	80	1805.87	0	5	12	1	1	4	16	#t
+aes-nangate45	2	default	-22.001	-15.331	47.2732	18832.8	1	1	4	257.6	0	0	0	0	0	1	0	#t
