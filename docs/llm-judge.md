@@ -20,7 +20,9 @@ tools/llm_judge.py select --dir RUN_DIR --space SPACE_JSON --nodes "id:parent:b:
 | `LLM_JUDGE_PROVIDER` | 说明 |
 |---|---|
 | `mock`（默认） | 确定性、离线：选 incumbent 的最大 gap 阶段，取一步邻居。只用来打通管线，**不是 LLM** |
-| `minimax` | MiniMax，OpenAI 兼容 `/chat/completions`。<br>- key：`MINIMAX_API_KEY`<br>- 模型：`MINIMAX_MODEL`，默认 `MiniMax-M3.1-Flash`<br>- 地址：`MINIMAX_BASE_URL`，默认 `https://api.minimax.io/v1`，中国区为 `https://api.minimax.cn/v1`<br>（模型名与地址取自 platform.minimax.io 文档，2026-10-31 查阅） |
+| `minimax` | MiniMax。key `MINIMAX_API_KEY`；模型 `MINIMAX_MODEL`，默认 `MiniMax-M3.1-Flash`；地址 `MINIMAX_BASE_URL`，默认 `https://api.minimaxi.com/v1` |
+| `glm` | 智谱 GLM Coding Plan。key `GLM_API_KEY`；模型 `GLM_MODEL`，默认 `glm-5.3-flash`；地址 `GLM_BASE_URL`，默认 `https://open.bigmodel.cn/api/coding/paas/v4` |
+| `deepseek` | DeepSeek。key `DEEPSEEK_API_KEY`；模型 `DEEPSEEK_MODEL`，默认 `deepseek-flash`；地址 `DEEPSEEK_BASE_URL`，默认 `https://api.deepseek.com` |
 
 新增提供方：在 `tools/llm_judge.py` 的 `PROVIDERS` 中加一项。OpenAI 兼容接口只需要地址、key 环境变量名和默认模型名。
 
@@ -42,3 +44,9 @@ python3 tools/llm_judge.py prompt --dir RUN_DIR --space SPACE_JSON --nodes ...  
 ```
 
 目前只用 `mock` 在合成环境里验证过管线：syn-A 种子 1 上，`llm-judge`（mock）跑完 20 次评估，10 次调用全部有效、零回退。本仓库还**没有**任何真实 LLM 的结果。
+
+## 提供方配置说明（2026-10-31）
+
+- 三个提供方都走 OpenAI 兼容的 `POST <base>/chat/completions`。地址和模型名由仓库所有者提供，并说明三个 key 都已验证可用。本仓库的实验还没有通过本接口调用过任何一个。
+- 用 `LLM_JUDGE_PROVIDER=minimax|glm|deepseek` 选择提供方。key 只从环境变量读取，不写入代码、日志或 `llm_calls.jsonl`。
+- Aura 跑在开发容器里时，key 要作为环境变量传进容器。用 `docker run -e MINIMAX_API_KEY` 这种只写变量名的形式，不要把值写在命令行上。

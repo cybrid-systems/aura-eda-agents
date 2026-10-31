@@ -13,8 +13,10 @@ Aura 侧（aura/pd.aura 的 llm-judge 方法）每轮调用一次：
 
 提供方（LLM_JUDGE_PROVIDER）：
   mock     确定性、离线：选 incumbent 的最大瓶颈阶段，取一步邻居。只用于打通管线，不代表 LLM。
-  minimax  MiniMax，OpenAI 兼容接口。key 从环境变量 MINIMAX_API_KEY 读取；可选 MINIMAX_BASE_URL
-           （默认 https://api.minimax.io/v1，中国区 https://api.minimax.cn/v1）、MINIMAX_MODEL（默认 MiniMax-M3.1-Flash）。
+  以下均为 OpenAI 兼容接口（POST <base>/chat/completions），key 只从环境变量读取，base/model 可用环境变量覆盖：
+  minimax   MINIMAX_API_KEY；MINIMAX_BASE_URL 默认 https://api.minimaxi.com/v1；MINIMAX_MODEL 默认 MiniMax-M3.1-Flash
+  glm       GLM_API_KEY（智谱 GLM Coding Plan）；GLM_BASE_URL 默认 https://open.bigmodel.cn/api/coding/paas/v4；GLM_MODEL 默认 glm-5.3-flash
+  deepseek  DEEPSEEK_API_KEY；DEEPSEEK_BASE_URL 默认 https://api.deepseek.com；DEEPSEEK_MODEL 默认 deepseek-flash
 新增提供方：在 PROVIDERS 里加一项（OpenAI 兼容的只需 base_url / key 环境变量名 / 模型名）。
 
 安全：真实网络调用必须显式设置 LLM_JUDGE_ALLOW_NETWORK=1；key 只从环境变量读取，永不写入日志、输出或报错信息。
@@ -23,8 +25,12 @@ import argparse, hashlib, json, os, re, sys, time, urllib.request
 
 STAGES = ["FP", "PL", "CTS", "GR"]
 PROVIDERS = {
-    "minimax": {"kind": "openai", "base_url_env": "MINIMAX_BASE_URL", "base_url": "https://api.minimax.io/v1",
+    "minimax": {"kind": "openai", "base_url_env": "MINIMAX_BASE_URL", "base_url": "https://api.minimaxi.com/v1",
                 "key_env": "MINIMAX_API_KEY", "model_env": "MINIMAX_MODEL", "model": "MiniMax-M3.1-Flash"},
+    "glm": {"kind": "openai", "base_url_env": "GLM_BASE_URL", "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "key_env": "GLM_API_KEY", "model_env": "GLM_MODEL", "model": "glm-5.3-flash"},
+    "deepseek": {"kind": "openai", "base_url_env": "DEEPSEEK_BASE_URL", "base_url": "https://api.deepseek.com",
+                 "key_env": "DEEPSEEK_API_KEY", "model_env": "DEEPSEEK_MODEL", "model": "deepseek-flash"},
     "mock": {"kind": "mock"},
 }
 
