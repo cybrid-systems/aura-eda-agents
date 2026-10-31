@@ -5,7 +5,11 @@
 - **AgenticPD**（arXiv:2607.04758，ASPDAC'27）：阶段感知的物理设计树搜索。
 - **AgenticECO**（arXiv:2608.03738）：证据门控的 3D-IC ECO 修复。
 
-> ⚠️ **本仓库所有实验数字都来自确定性的合成环境**（`tools/pdsim.py`、`tools/eco3d.py`）。没有运行任何真实 EDA 工具，没有调用任何 LLM，也不含任何真实或客户设计数据。数字只能在仓库内部横向比较，**不能**与论文数字对比。论文里的数字见 [docs/papers.md](docs/papers.md)，已对照原文核对。
+> ⚠️ 本仓库有两类数字，表格里都会分别标注：
+> - **真实 ORFS**：PD 树搜索接入真实 OpenROAD-flow-scripts，设计为 ORFS 自带的公开设计 gcd/nangate45，见下文“结果（真实 ORFS）”。
+> - **合成**：确定性合成环境（`tools/pdsim.py`、`tools/eco3d.py`）。ECO 部分全部是合成数据。
+>
+> 两类都没有调用任何 LLM，也不含任何客户设计数据。数字只能在仓库内部横向比较，**不能**与论文数字对比。论文里的数字见 [docs/papers.md](docs/papers.md)，已对照原文核对。
 
 ## 动机
 
@@ -89,10 +93,48 @@ flowchart TB
 | Aura 运行时原语（fiber、overlay commit/rollback、ast:snapshot/restore、mutate:rebind、mutation-log） | **真实**：在 Aura main（5af7fd023）上实际运行，`tests/aura/core.aura` 断言了这些性质 |
 | 编排逻辑（树搜索、分支复用、证据出处、验证门控提交、哈希链账本、演化门禁） | **真实**：Aura 代码，可运行 |
 | Judge / stage agent / 规划器的"智能" | **模拟**：确定性启发式策略，**没有 LLM**。论文中这些都是 LLM |
-| PD 流程（FP/PL/CTS/GR/DR）与 QoR | **模拟**：`tools/pdsim.py` 的解析式合成模型；阶段成本是假设值 |
+| PD 流程（FP/PL/CTS/GR/DR）与 QoR | **两套后端**：<br>- **真实**：`adapters/openroad/backend.py` 逐阶段调用 ORFS（官方镜像 openroad/orfs，设计 gcd/nangate45）。每阶段 .odb 作为检查点供分支复用；WNS/TNS/功耗/面积取自 ORFS 指标 JSON；成本为实测秒数。<br>- **模拟**：`tools/pdsim.py` 的解析式模型，阶段成本为假设值 |
 | 3D-IC HBT 布局、DRC、时序、结构等价 | **模拟**：`tools/eco3d.py` 的网格模型 |
-| OpenROAD/ORFS 接入 | **未实现**：只有接口桩 `adapters/openroad/` |
+| OpenROAD/ORFS 接入 | **PD 已实现**：`tests/test_orfs.py` 验证 ORFS 的确定性，以及“检查点复用 = 全量重跑”。<br>**ECO 未接入**：开源流程里没有混合键合 3D-IC 设计与缺陷，论文引擎 TaiWei 与缺陷案例也取不到，原因见 [docs/eco-real.md](docs/eco-real.md) |
 | 论文数字 | 只在 `docs/papers.md` 中引用，本仓库**没有**复现 |
+
+## 结果（真实 ORFS）
+
+完整表格见 [results/summary_orfs.md](results/summary_orfs.md)，可用 `python3 tools/summarize_orfs.py` 重新生成。
+
+**设置**：
+- 设计与平台：ORFS 自带的 gcd / nangate45，官方 SDC，时钟周期 0.25 ns。
+- 镜像：`openroad/orfs@sha256:cba40c1d…52b49fa`，Yosys 0.68+post；OpenROAD 版本串为 unknown，以镜像 digest 作为版本标识。
+- 搜索空间：4 个阶段各 2 个 ORFS 变量，共 4608 种组合，见 [adapters/openroad/README.md](adapters/openroad/README.md)。
+- 运行规模：3 个种子 × 6 种方法，每次预算 20 次到 GR 的评估；`NUM_CORES=4`，一次只跑一个 flow。
+
+| 方法 | 平均 GR WNS (ps) | 平均 finish WNS (ps) | 平均阶段执行数 | 平均成本（实测秒） |
+|---|---|---|---|---|
+| ORFS 默认配置 | −158.565 | −155.709 | 4.0 | 63 |
+| 扁平随机 | −159.737 | −156.974 | 79.3 | 620 |
+| 类 AutoTuner 扁平局部搜索 | −158.565 | −155.709 | 80.0 | 846 |
+| 最大瓶颈贪心（复用） | −158.565 | −155.709 | 67.0 | 804 |
+| 历史感知 Judge（复用） | −158.565 | −155.709 | **46.7** | 669 |
+| 同一 Judge，不复用 | −158.565 | −155.709 | 80.0 | 811 |
+
+- **没有任何搜索方法超过 ORFS 默认配置。**
+  - 6 种方法合计评估了 110 个不同的完整配置，最好的就是默认值（另有 4 个配置与它并列）。中位数 −165.4 ps。
+  - 默认配置 finish 后 DRC 为 0。
+  - 在这个小设计和这组旋钮上，ORFS 默认值已经是我们能找到的最好结果。论文报告的 WNS 提升在这里**没有复现**。
+  - 可能的原因：
+    - gcd 太小；
+    - 0.25 ns 时钟下 WNS 主要由 ORFS 自身的 repair_timing 决定；
+    - 所选旋钮对时序的杠杆不够。
+- **复用的收益是真实的**：
+  - Judge 复用与不复用得到相同的 incumbent（3/3）；
+  - 阶段执行数 46.7 vs 80.0，实测成本 669 s vs 811 s（−17%）。
+  - 节省比例小于合成环境（−27%），因为真实 ORFS 中 GR（含修复）一个阶段就约 33 s，占一条完整链约 45 s 的大头，复用上游省下的只是 FP/PL/CTS 各约 4 s。
+- 失败配置全部是 `CORE_UTILIZATION=65`：时序修复增大面积后合法化失败（DPL-0038 / DPL-0033）。
+- 计算量：
+  - 逻辑阶段执行 1089 次（记账 190.6 分钟），真正调用 ORFS 294 次（实测 56.0 分钟），其余命中结果缓存。
+  - 缓存键为（阶段，上游全部旋钮）。ORFS 的确定性已由测试验证。
+  - 总墙钟 56.4 分钟。
+- 统计意义有限：只有 1 个设计、3 个种子。Judge 是确定性启发式，不是 LLM。
 
 ## 结果（合成）
 
@@ -138,7 +180,11 @@ flowchart TB
 ## 路线图
 
 1. **轻集成（当前）**：Aura 作为编排层，EDA 工具作为子进程。状态的载体是检查点文件 + overlay 里的全局绑定。
-   - 下一步：实现 `adapters/openroad`，在 ORFS 的公开设计上复现 AgenticPD 的流程。
+   - 已完成：`adapters/openroad` 接入 ORFS（gcd/nangate45）。
+   - 下一步：
+     - 换更大的设计（如 aes、ibex，sky130hd / asap7）；
+     - 加入对时序更有杠杆的旋钮，例如时钟周期余量、repair_timing 参数、布局密度；
+     - 跨设计复用缓存。
    - 接入 LLM 作为 Judge / stage agent / 规划器，与确定性策略对照。
 2. **状态集成**：把检查点元数据、证据、账本作为 Aura 一等值放进 overlay / worldline，fork 分支时零拷贝共享上游。
    - 让 `ast:snapshot` 同时覆盖策略和搜索树。
@@ -156,9 +202,9 @@ flowchart TB
 ```
 aura/                 Aura 原型（pd / evolve / eco / *-main 入口 / common）
 tools/                合成环境与工具：pdsim.py  eco3d.py  landscape.py  ledger_check.py  summarize.py
-adapters/openroad/    真实后端接口桩（未实现）
-tests/                test_envs.py（环境/验证器）  aura/core.aura（Aura 性质测试）  run_tests.sh
-results/              实验输出 TSV 与 summary.md（合成）
+adapters/openroad/    真实 ORFS 后端（backend.py）与宿主机桥（bridge.py）
+tests/                test_envs.py（环境/验证器）  aura/core.aura（Aura 性质测试）  run_tests.sh  test_orfs.py（真实 ORFS 确定性/复用等价）
+results/              合成：pd_runs.tsv 等与 summary.md；真实 ORFS：pd_runs_orfs.tsv、orfs_ledgers/、orfs_meta.json、summary_orfs.md
 docs/                 papers.md（论文事实）  design.md（设计与假设）  aura-issues.md（构建中发现的 Aura 问题）
 scripts/aura.sh       拼接模块并用 aura --load 运行
 ```
@@ -174,6 +220,12 @@ scripts/aura.sh aura/pd-main.aura        # PD：→ results/pd_runs.tsv
 scripts/aura.sh aura/evolve-main.aura    # Judge 演化：→ results/evolve_*.tsv
 scripts/aura.sh aura/eco-main.aura       # ECO：→ results/eco_runs.tsv
 python3 tools/summarize.py               # → results/summary.md
+
+# 真实 ORFS（需要 docker 与 openroad/orfs 镜像，见 adapters/openroad/README.md）
+python3 tests/test_orfs.py
+PD_TOOL=adapters/openroad/backend.py PD_DESIGNS=gcd-nangate45 PD_SEEDS=1,2,3 \
+  PD_OUT=results/pd_runs_orfs.tsv AURA_TIMEOUT=43200 scripts/aura.sh aura/pd-main.aura
+python3 tools/summarize_orfs.py          # → results/summary_orfs.md
 ```
 
 所有环境和策略都是确定性的，同样的种子会得到同样的结果。

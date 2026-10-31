@@ -25,5 +25,5 @@
 
 - 所有方法、所有种子合计评估了 110 个不同的完整配置（到 GR 成功），另有 11 个配置在 GR 失败。
 - 最好的 GR WNS 是 -158.565 ps，就是 ORFS 默认值；**没有任何配置优于默认**（0 个）。中位数 -165.363 ps，最差 -191.854 ps。
-- 失败都出现在 CORE_UTILIZATION=65：前三阶段成功，GR 后的修复让单元面积超过行容量，报 `[ERROR DPL-0038] Utilization greater than 100%, impossible to legalize`。
+- 失败全部出现在 CORE_UTILIZATION=65，多数在 GR、少数在 CTS。GR 及 CTS 后的时序修复会加大单元面积，随后合法化失败，日志里是 `[ERROR DPL-0038] Utilization greater than 100%, impossible to legalize` 或 `[ERROR DPL-0033] detailed placement checks failed`。
 
