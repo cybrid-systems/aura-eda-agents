@@ -3,7 +3,7 @@
 (pd-init! "runs/pd")
 (define *seeds* (map (lambda (s) (string->number s)) (string-split (env-or "PD_SEEDS" "1,2,3,4,5") ",")))
 (define *designs* (string-split (env-or "PD_DESIGNS" "syn-A,syn-B,syn-C") ","))
-(define *methods* (list "default" "random" "autotuner" "greedy" "judge" "judge-norerun"))
+(define *methods* (string-split (env-or "PD_METHODS" "default,random,autotuner,greedy,judge,judge-norerun") ","))   ;; 可加 llm-judge
 (define out (env-or "PD_OUT" "results/pd_runs.tsv"))
 (write-file out "design\tseed\tmethod\tgr_wns\tdr_wns\tpower\tarea\tevals\tgr_runs\tstage_runs\tcost\tfails\tbranch_FP\tbranch_PL\tbranch_CTS\tbranch_GR\tcommits\trollbacks\toverlay_incumbent_ok\n")
 (for-each

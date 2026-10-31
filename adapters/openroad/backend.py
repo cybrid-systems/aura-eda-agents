@@ -27,29 +27,69 @@ WORK = os.environ.get("ORFS_WORK", "/workspace/orfs-work")
 IMAGE = os.environ.get("ORFS_IMAGE", "openroad/orfs:latest")
 CONTAINER = os.environ.get("ORFS_CONTAINER", "orfs-eda")
 CORES = os.environ.get("ORFS_CORES", "4")
-DESIGNS = {"gcd-nangate45": "designs/nangate45/gcd/config.mk"}
-PLAT_DESIGN = {"gcd-nangate45": ("nangate45", "gcd")}
+# 设计注册表：ORFS 自带公开设计。clk = 官方 SDC 的时钟周期（ns），util = config.mk 的 CORE_UTILIZATION
+# （None 表示该设计用固定 FLOORPLAN_DEF，利用率旋钮无效），incr = config.mk 是否做 GR 后增量修复。
+DESIGNS = {
+    "gcd-nangate45":  {"config": "designs/nangate45/gcd/config.mk",  "plat": "nangate45", "name": "gcd",  "clk": 0.25, "util": 55,   "incr": 1},
+    "aes-nangate45":  {"config": "designs/nangate45/aes/config.mk",  "plat": "nangate45", "name": "aes",  "clk": 0.82, "util": None, "incr": 0},
+    "ibex-nangate45": {"config": "designs/nangate45/ibex/config.mk", "plat": "nangate45", "name": "ibex", "clk": 2.2,  "util": 50,   "incr": 1},
+}
+SPACE_VERSION = os.environ.get("ORFS_SPACE", "v1")
+SPACE = DEFAULT = VARS = None
 
 STAGES = ["FP", "PL", "CTS", "GR"]
 STAGE_NUM = {"FP": 2, "PL": 3, "CTS": 4, "GR": 5}
-# 每个旋钮 -> (ORFS 变量, 取值)；0 / None 表示"不传，用 ORFS 默认"
-SPACE = {
-    "FP":  {"util": [35, 45, 55, 65], "aspect": [0.7, 1.0, 1.4]},
-    "PL":  {"density": [0.0, 0.1, 0.2, 0.3], "td": [0, 1]},
-    "CTS": {"cluster": [0, 10, 20, 40], "margin": [0.0, 0.01, 0.03]},
-    "GR":  {"incr": [0, 1], "opt": [0, 1]},
-}
-# gcd/nangate45 的 ORFS 官方默认（config.mk：CORE_UTILIZATION 55，PLACE_DENSITY_LB_ADDON 0.20；其余为 ORFS 默认）
-DEFAULT = {"FP": {"util": 55, "aspect": 1.0}, "PL": {"density": 0.2, "td": 1},
-           "CTS": {"cluster": 0, "margin": 0.0}, "GR": {"incr": 1, "opt": 1}}
-VARS = {
-    "FP":  lambda k: {"CORE_UTILIZATION": k["util"], "CORE_ASPECT_RATIO": k["aspect"]},
-    "PL":  lambda k: {"PLACE_DENSITY_LB_ADDON": k["density"], "GPL_TIMING_DRIVEN": k["td"]},
-    "CTS": lambda k: dict(({"CTS_CLUSTER_SIZE": k["cluster"]} if k["cluster"] else {}),
-                          **({"SETUP_SLACK_MARGIN": k["margin"]} if k["margin"] else {})),
-    # incr=1 表示做 GR 后增量修复（ORFS 默认 SKIP_INCREMENTAL_REPAIR=0）；opt=1 表示 OPT_POST_GRT_WNS=1（默认）
-    "GR":  lambda k: {"SKIP_INCREMENTAL_REPAIR": 0 if k["incr"] else 1, "OPT_POST_GRT_WNS": k["opt"]},
-}
+
+
+def configure(design, version=None):
+    """按设计与空间版本设置 SPACE / DEFAULT / VARS（每个值都要能映射回 ORFS 变量；默认组合 == 官方配置）。
+
+    v1：Phase 2 的 gcd 空间（保留以便复现）。
+    v2：面向时序的空间。修复余量 SETUP_SLACK_MARGIN 按时钟周期的百分比给出，归属 FP，
+        因此 floorplan/CTS/GR 三处 repair_timing 用同一余量。"""
+    global SPACE, DEFAULT, VARS, SPACE_VERSION
+    version = version or SPACE_VERSION; SPACE_VERSION = version
+    D = DESIGNS[design]
+    if version == "v1":
+        SPACE = {"FP": {"util": [35, 45, 55, 65], "aspect": [0.7, 1.0, 1.4]},
+                 "PL": {"density": [0.0, 0.1, 0.2, 0.3], "td": [0, 1]},
+                 "CTS": {"cluster": [0, 10, 20, 40], "margin": [0.0, 0.01, 0.03]},
+                 "GR": {"incr": [0, 1], "opt": [0, 1]}}
+        DEFAULT = {"FP": {"util": 55, "aspect": 1.0}, "PL": {"density": 0.2, "td": 1},
+                   "CTS": {"cluster": 0, "margin": 0.0}, "GR": {"incr": 1, "opt": 1}}
+        VARS = {
+            "FP": lambda k: {"CORE_UTILIZATION": k["util"], "CORE_ASPECT_RATIO": k["aspect"]},
+            "PL": lambda k: {"PLACE_DENSITY_LB_ADDON": k["density"], "GPL_TIMING_DRIVEN": k["td"]},
+            "CTS": lambda k: dict(({"CTS_CLUSTER_SIZE": k["cluster"]} if k["cluster"] else {}),
+                                  **({"SETUP_SLACK_MARGIN": k["margin"]} if k["margin"] else {})),
+            "GR": lambda k: {"SKIP_INCREMENTAL_REPAIR": 0 if k["incr"] else 1, "OPT_POST_GRT_WNS": k["opt"]},
+        }
+        return
+    assert version == "v2", version
+    util = [-10, 0, 10] if D["util"] is not None else [0]     # 相对官方利用率的增量（百分点）
+    SPACE = {"FP": {"util": util, "margin": [0, 3, 8]},          # margin：SETUP_SLACK_MARGIN = 周期 × margin%
+             "PL": {"density": [0.1, 0.2, 0.35], "td": [0, 1], "prt": [0, 1]},
+             "CTS": {"cluster": [0, 10, 30]},
+             "GR": {"incr": [0, 1], "opt": [0, 1]}}
+    DEFAULT = {"FP": {"util": 0, "margin": 0}, "PL": {"density": 0.2, "td": 1, "prt": 0},
+               "CTS": {"cluster": 0}, "GR": {"incr": D["incr"], "opt": 1}}
+
+    def fp(k):
+        e = {}
+        if D["util"] is not None:
+            e["CORE_UTILIZATION"] = D["util"] + k["util"]
+        if k["margin"]:
+            e["SETUP_SLACK_MARGIN"] = round(D["clk"] * k["margin"] / 100.0, 4)
+        return e
+    VARS = {
+        "FP": fp,
+        "PL": lambda k: {"PLACE_DENSITY_LB_ADDON": k["density"], "GPL_TIMING_DRIVEN": k["td"],
+                         "ENABLE_PLACE_REPAIR_TIMING": k["prt"]},
+        "CTS": lambda k: {"CTS_CLUSTER_SIZE": k["cluster"]} if k["cluster"] else {},
+        "GR": lambda k: {"SKIP_INCREMENTAL_REPAIR": 0 if k["incr"] else 1, "OPT_POST_GRT_WNS": k["opt"]},
+    }
+
+
 TARGETS = {"FP": ["do-floorplan"], "PL": ["do-place"], "CTS": ["do-cts"], "GR": ["do-5_1_grt"],
            "DR": ["do-5_2_route", "do-5_3_fillcell", "do-5_route", "do-5_route.sdc", "do-finish"]}
 METRIC = {"FP": ("2_1_floorplan", "floorplan"), "PL": ("3_5_place_dp", "detailedplace"),
@@ -84,7 +124,7 @@ def env_for(knobs, upto):
 
 def cache_key(design, knobs, upto):
     n = len(STAGES) if upto == "DR" else STAGES.index(upto) + 1
-    return hashlib.sha256(json.dumps([design, upto, {s: knobs[s] for s in STAGES[:n]}], sort_keys=True).encode()).hexdigest()[:20]
+    return hashlib.sha256(json.dumps([design, upto, {s: knobs[s] for s in STAGES[:n]}] + ([SPACE_VERSION] if SPACE_VERSION != "v1" else []), sort_keys=True).encode()).hexdigest()[:20]
 
 
 def cpath(host):   # 宿主机路径 -> 容器路径
@@ -129,7 +169,7 @@ def make(design, work_home, targets, env, log):
     """在容器里跑一次 ORFS make（持锁：一次只跑一个 flow）。返回 (ok, 秒)。"""
     vs = " ".join("%s=%s" % (k, v) for k, v in sorted(env.items()))
     cmd = ("source ../env.sh >/dev/null 2>&1; make DESIGN_CONFIG=%s WORK_HOME=%s NUM_CORES=%s %s %s"
-           % (DESIGNS[design], cpath(work_home), CORES, vs, " ".join(targets)))
+           % (DESIGNS[design]["config"], cpath(work_home), CORES, vs, " ".join(targets)))
     os.makedirs(WORK, exist_ok=True)
     with open(os.path.join(WORK, ".flow.lock"), "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
@@ -141,7 +181,7 @@ def make(design, work_home, targets, env, log):
 
 
 def sub(work_home, design, kind):
-    p, d = PLAT_DESIGN[design]
+    p, d = DESIGNS[design]["plat"], DESIGNS[design]["name"]
     return os.path.join(work_home, kind, p, d, "base")
 
 
@@ -236,13 +276,17 @@ def append_ledger(path, rec):
 
 
 def cmd_space(a):
-    json.dump({"stages": STAGES, "space": SPACE, "default": DEFAULT, "designs": sorted(DESIGNS),
+    design = os.environ.get("PD_DESIGNS", "gcd-nangate45").split(",")[0]
+    configure(design)
+    json.dump({"stages": STAGES, "space": SPACE, "default": DEFAULT, "designs": sorted(DESIGNS), "space_version": SPACE_VERSION,
+               "space_design": design,
                "cost": "measured-seconds", "backend": "orfs", "image": IMAGE,
                "combos": {s: combos(s) for s in STAGES}, "neighbors": {s: neighbors(s) for s in STAGES},
                "default_idx": [combos(s).index(DEFAULT[s]) for s in STAGES]}, open(a.out, "w"), sort_keys=True)
 
 
 def cmd_chain(a):
+    configure(a.design)
     idx = [int(x) for x in a.knobs[4:].split(",")]
     knobs = {s: combos(s)[i] for s, i in zip(STAGES, idx)}
     i0 = STAGES.index(a.frm)
@@ -273,7 +317,7 @@ def cmd_chain(a):
              "tns": round(1000.0 * m["tns_ns"], 3) if m and m["tns_ns"] is not None else None,
              "power": round(1000.0 * m["power_w"], 5) if m and m["power_w"] is not None else None,
              "area": m["area_um2"] if m else None, "cong": 0.0, "route_fail": not ok}
-        st = {"stage": s, "design": a.design, "knobs": knobs, "work": wh, "ancestors": dict(anc), "pen": dict(pen),
+        st = {"stage": s, "design": a.design, "space_version": SPACE_VERSION, "knobs": knobs, "work": wh, "ancestors": dict(anc), "pen": dict(pen),
               "qor": q, "metrics": m}
         snap = os.path.join(WORK, "ck", hashlib.sha256((outdir + s).encode()).hexdigest()[:16])
         copy_upto(wh, snap, a.design, STAGE_NUM[s])   # 每阶段检查点各自一份：后代从这里复用
@@ -293,6 +337,7 @@ def cmd_chain(a):
 def cmd_dr(a):
     st = json.load(open(a.ckpt)); assert st["stage"] == "GR"
     design = st["design"]
+    configure(design, st.get("space_version", "v1"))
     wh = os.path.join(WORK, "w", "dr-" + hashlib.sha256(os.path.abspath(a.ckpt).encode()).hexdigest()[:16])
     copy_upto(st["work"], wh, design, 5)
     ok, cost, wall, cached = run_or_cache(design, st["knobs"], "DR", wh, os.path.abspath(a.out) + ".orfs.log")

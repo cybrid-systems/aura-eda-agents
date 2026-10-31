@@ -7,6 +7,8 @@
 
 (define *pd-stages* (list "FP" "PL" "CTS" "GR"))
 (define *pd-space* #f)
+(define *pd-space-path* #f)
+(define *judge-tool* (env-or "PD_JUDGE_TOOL" "tools/llm_judge.py"))   ;; 可插拔 LLM Judge（llm-judge 方法）
 (define *pd-budget* (string->number (env-or "PD_BUDGET" "20")))   ;; 昂贵评估（到 GR 的完整候选）预算，和论文设置一致：20
 (define *pd-width* (string->number (env-or "PD_WIDTH" "2")))      ;; 每轮并行分支数
 (define pd-incumbent "none")   ;; 全局 incumbent 检查点；只有被 Judge 批准的分支能在 overlay 里改它并提交
@@ -18,6 +20,7 @@
 (define (pd-init! dir)
   (sh (string-append "mkdir -p " dir))
   (run! (string-append *py* " " *pd-tool* " space --out " dir "/space.json"))
+  (set! *pd-space-path* (string-append dir "/space.json"))
   (set! *pd-space* (read-json (string-append dir "/space.json"))))
 (define (pd-combos s) (hget (hget *pd-space* "combos" #f) (list-ref *pd-stages* s) (list)))
 (define (pd-neighbors s c) (list-ref (hget (hget *pd-space* "neighbors" #f) (list-ref *pd-stages* s) (list)) c))
@@ -29,7 +32,7 @@
     (hash-set! c "design" design) (hash-set! c "method" method) (hash-set! c "dir" dir) (hash-set! c "reuse" reuse)
     (hash-set! c "rng" (rng-make seed)) (hash-set! c "nodes" (list)) (hash-set! c "next" 0) (hash-set! c "evals" 0)
     (hash-set! c "tried" (hash)) (hash-set! c "stage-tries" (list 0 0 0 0)) (hash-set! c "stage-gains" (list 0 0 0 0))
-    (hash-set! c "exp" (hash)) (hash-set! c "branch-stages" (list)) (hash-set! c "commits" 0) (hash-set! c "rollbacks" 0)
+    (hash-set! c "exp" (hash)) (hash-set! c "branch-stages" (list)) (hash-set! c "commits" 0) (hash-set! c "rollbacks" 0) (hash-set! c "llm-fallbacks" 0)
     (sh (string-append "rm -rf " dir " && mkdir -p " dir))
     c))
 (define (ctx-get c k) (hash-ref c k))
@@ -183,6 +186,24 @@
                 (loop (cdr ps) (cons (list n s (set-nth (hget n "idx" (list)) s cand)) acc))
                 (loop (cdr ps) acc)))))))
 
+;; ---- LLM Judge：外部工具给出 (节点, 分支阶段, 新设置)；无效或出错时回退到确定性 Judge ----
+(define (node-by-id c id) (let ((xs (filter (lambda (n) (= (hget n "id" -1) id)) (ctx-get c "nodes")))) (if (null? xs) #f (car xs))))
+(define (llm-select c room)
+  (let* ((dir (ctx-get c "dir")) (k (ctx-get c "next"))
+         (enc (join-strings (map (lambda (n) (format "~a:~a:~a:~a:~a" (hget n "id" -1) (hget n "parent" -1) (hget n "b" 0)
+                                                     (nums->csv (hget n "idx" (list))) (if (hget n "fail" #f) 1 0)))
+                                 (ctx-get c "nodes")) ";"))
+         (out (format "~a/judge~a.json" dir k)))
+    (run! (string-append *py* " " *judge-tool* " select --dir " dir " --space " *pd-space-path* " --nodes '" enc "'"
+                         " --width " (number->string (min *pd-width* room)) " --budget-left " (number->string room) " --out " out))
+    (let* ((picks (hget (read-json out) "picks" (list)))
+           (specs (filter (lambda (x) (car x))
+                          (map (lambda (p) (list (node-by-id c (hget p "node" -1)) (hget p "b" 0) (hget p "idx" (list)))) picks))))
+      (if (null? specs)
+          (begin (hash-set! c "llm-fallbacks" (+ 1 (ctx-get c "llm-fallbacks")))
+                 (take (map (lambda (x) (list (car x) (cadr x) (caddr x))) (judge-select c "judge")) room))
+          (take specs (min room (length specs)))))))
+
 ;; ---- 方法 ----
 (define (random-idx r) (map (lambda (s) (rng-int! r (length (pd-combos s)))) (range 4)))
 (define (mutate-idx r idx)   ;; AutoTuner 式局部扰动：改 1~2 个阶段，各取一个一步邻居
@@ -197,7 +218,7 @@
 
 (define (pd-run design method seed dir)
   (let* ((reuse (not (equal? method "judge-norerun")))
-         (c (ctx-make design method seed dir (and reuse (or (equal? method "judge") (equal? method "greedy")))))
+         (c (ctx-make design method seed dir (and reuse (or (equal? method "judge") (equal? method "greedy") (equal? method "llm-judge")))))
          (r (ctx-get c "rng")))
     (set! pd-incumbent "none")
     (cond
@@ -214,6 +235,7 @@
                           (cond ((equal? method "autotuner")
                                  (let ((inc (pd-incumbent-node c)))
                                    (map (lambda (i) (list #f 0 (mutate-idx r (hget inc "idx" (pd-default-idx))))) (range (min *pd-width* room)))))
+                                ((equal? method "llm-judge") (llm-select c room))
                                 (else
                                  (let ((sel (judge-select c (if (equal? method "greedy") "greedy" "judge"))))
                                    (take (map (lambda (x) (list (car x) (cadr x) (caddr x))) sel) room))))))
@@ -238,6 +260,6 @@
       (hash-set! out "cost" (hget L "cost" 0))
       (hash-set! out "fails" (length (filter (lambda (n) (hget n "fail" #f)) (ctx-get c "nodes"))))
       (hash-set! out "branch_stage_hist" (map (lambda (s) (length (filter (lambda (b) (= b s)) bs))) (range 4)))
-      (hash-set! out "commits" (ctx-get c "commits")) (hash-set! out "rollbacks" (ctx-get c "rollbacks"))
+      (hash-set! out "commits" (ctx-get c "commits")) (hash-set! out "llm_fallbacks" (ctx-get c "llm-fallbacks")) (hash-set! out "rollbacks" (ctx-get c "rollbacks"))
       (hash-set! out "incumbent_global" pd-incumbent)
       out)))
