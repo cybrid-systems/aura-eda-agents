@@ -1,0 +1,46 @@
+;; uses: pd.aura eco.aura evolve.aura
+;; Aura 侧核心性质测试（合成环境）。通过 = 打印 ALL-OK 且退出码 0。
+(define *fails* 0)
+(define (check! ok msg) (if ok (display (format "  pass: ~a\n" msg)) (begin (set! *fails* (+ *fails* 1)) (display (format "  FAIL: ~a\n" msg)))))
+(sh "rm -rf runs/test && mkdir -p runs/test")
+
+;; 1) 证据准入：缺 provenance / 哈希不符的记录被拒
+(define p-ok (hash)) (hash-set! p-ok "tool" "x") (hash-set! p-ok "ckpt_sha256" "abc")
+(check! (equal? (admit-evidence (make-evidence "drc" #f #f "c") "abc") "缺少 provenance") "无 provenance 的证据被拒")
+(check! (string? (admit-evidence (make-evidence "drc" #f p-ok "c") "def")) "检查点哈希不符的证据被拒")
+(check! (not (admit-evidence (make-evidence "drc" #f p-ok "c") "abc")) "出处完整且哈希一致的证据被收")
+
+;; 2) 专家只读：专家 fiber 在 overlay 里写了 eco-current，但回滚后全局不变
+(run! (string-append *py* " tools/eco3d.py gen --design eco-S --seed 2 --out runs/test/case.json"))
+(set! eco-current "sentinel")
+(define outs (run-experts! "runs/test/case.json" "runs/test" "t" *experts*))
+(check! (equal? eco-current "sentinel") "专家 fiber 的写入被 overlay 回滚（只读）")
+(check! (= (length outs) 4) "4 个专家都返回了证据文件")
+
+;; 3) 证据门控修复：小预算下也不会提交未经验证的改动；账本哈希链可独立复核
+(set! *eco-budget* 6)
+(define r (eco-repair "runs/test/case.json" "runs/test/eco" (list)))
+(run! (string-append *py* " tools/eco3d.py verify --before runs/test/case.json --after " (car r) " --allowed '*' --out runs/test/v.json"))
+(define v (read-json "runs/test/v.json"))
+(check! (hget (hget v "gates" #f) "drc_no_new" #f) "最终结果没有新 DRC")
+(check! (null? (hget v "clock_changed" (list 1))) "最终结果没有动时钟线网")
+(check! (= 0 (sh (string-append *py* " tools/ledger_check.py runs/test/eco/ledger.jsonl > /dev/null"))) "账本哈希链校验通过")
+(check! (equal? eco-current (car r)) "共享状态 eco-current 只经由 overlay-commit 更新且与最终检查点一致")
+
+;; 4) PD：复用上游检查点与全量重跑 QoR 一致、成本更低
+(pd-init! "runs/test/pd")
+(define a (pd-run "syn-A" "judge" 7 "runs/test/pd/reuse"))
+(define b (pd-run "syn-A" "judge-norerun" 7 "runs/test/pd/norerun"))
+(check! (equal? (hget a "gr_wns" 0) (hget b "gr_wns" 1)) "复用与全量重跑得到相同 incumbent QoR")
+(check! (< (hget a "cost" 0) (hget b "cost" 0)) "复用的成本更低")
+(check! (string-contains? pd-incumbent "runs/test/pd/norerun") "pd-incumbent 只被胜出分支的 overlay-commit 更新")
+
+;; 5) 演化门禁：rebind 生效、ast:restore 真正回退代码
+(define S (ast:snapshot "t-pre"))
+(define before (judge-policy))
+(mutate:rebind "judge-policy" (policy-src (list 9 9 9 9)) "test-rebind") (eval-current)
+(check! (equal? (judge-policy) (list 9 9 9 9)) "mutate:rebind 改写了 live AST 中的策略")
+(ast:restore S) (eval-current)
+(check! (equal? (judge-policy) before) "ast:restore 把策略代码回退到快照")
+
+(if (= *fails* 0) (display "ALL-OK\n") (begin (display (format "FAILS=~a\n" *fails*)) (error "tests failed")))

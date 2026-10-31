@@ -19,7 +19,7 @@
                              (begin (sh (string-append "mkdir -p " dir))
                                     (run! (string-append *py* " tools/eco3d.py " m " --ckpt " ck " --out " dir "/final.json"))
                                     (list (string-append dir "/final.json") 1 (string-append dir "/final.json"))))
-                            (else (eco-repair ck dir (if (equal? m "agent") (list) (list (substring m 6 (string-length m)))))))))
+                            (else (eco-repair ck dir (if (equal? m "agent") (list) (list (substring m 6 (string-length m))))))))
                  (final (car res)))
             (run! (string-append *py* " tools/eco3d.py verify --before " ck " --after " final " --allowed '*' --out " dir "/final.verify.json"))
             (let* ((v (read-json (string-append dir "/final.verify.json"))) (g (hget v "gates" #f))

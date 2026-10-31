@@ -7,7 +7,7 @@
 ;;    候选在各自 fiber 的 overlay 里执行 + 独立验证器验证，只有验证通过的最优候选 overlay-commit（排序：剩余 DRC，再 Δnet）；
 ;;  * 所有动作写进哈希链账本（sha256，tools/ledger_check.py 独立复核）。
 
-(define *eco-budget* (string->number (env-or "ECO_BUDGET" "12")))   ;; 每个案例的执行器调用上限（本仓库设定）
+(define *eco-budget* (string->number (env-or "ECO_BUDGET" "40")))   ;; 每个案例的执行器调用上限（本仓库设定；论文是 ≤40 次调用，但计数口径不同）
 (define eco-current "none")   ;; 已提交的当前检查点；只能经由验证通过的候选 overlay-commit 改变
 
 ;; ---- 小工具 ----
