@@ -5,7 +5,7 @@
 | Issue | 标题 | 本仓库的绕开方式 |
 |---|---|---|
 | [#4795](https://github.com/cybrid-systems/aura/issues/4795) | `string-split` 遇到多字符分隔符时静默只用首字符 | `aura/eco-main.aura` 改用 `substring` 解析方法名 |
-| [#4796](https://github.com/cybrid-systems/aura/issues/4796) | `json-stringify` 在类型检查器中注册，运行时却是 unbound（运行时名为 `json-encode`） | 用 `json-encode`，或手工拼接 TSV / JSON |
+| [#4796](https://github.com/cybrid-systems/aura/issues/4796) | `json-stringify` 在类型检查器中注册，运行时却是 unbound（运行时名为 `json-encode`） | 程序文件与结果都用字符串手工拼接 JSON / TSV（`json-encode` 在运行时可用） |
 | [#4797](https://github.com/cybrid-systems/aura/issues/4797) | `--load` 加载的定义不在 live AST：`ast:snapshot` 静默返回 -1，`mutate:rebind` 报误导性的 `bad-arg usage` | `aura/pd.aura` 用 `set-code` + `eval-current` 注入 `judge-policy` |
 
 沿用的已知问题绕开方式（已有 issue，未重复提交）：
