@@ -1,0 +1,21 @@
+{
+ "backend": "OpenROAD-flow-scripts (real)",
+ "image": "openroad/orfs:latest",
+ "image_digest": "openroad/orfs@sha256:cba40c1de21f048b545c005210dabe728bf501f4bb7d5ae5f03b33feb52b49fa",
+ "image_created": "2026-10-30 22:09 UTC+8",
+ "openroad_version": "unknown (image has no version string)",
+ "yosys": "0.68+post",
+ "num_cores": 4,
+ "host": "8 vCPU, 16 GB",
+ "budget": 20,
+ "width": 2,
+ "space": "v2",
+ "design": "ibex",
+ "platform": "nangate45",
+ "design_config": "designs/nangate45/ibex/config.mk",
+ "clock_period_ns": 2.2,
+ "seeds": [
+  1,
+  2
+ ]
+}
