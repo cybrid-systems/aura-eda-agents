@@ -35,6 +35,9 @@
 
 ;; ---- 子进程 ----
 (define *py* (env-or "PY" "python3"))
+;; 后端可替换：默认合成环境；真实后端需实现同一 CLI 契约（见 adapters/openroad/）
+(define *pd-tool* (env-or "PD_TOOL" "tools/pdsim.py"))
+(define *eco-tool* (env-or "ECO_TOOL" "tools/eco3d.py"))
 (define (run! cmd)   ;; 阻塞运行，失败抛错
   (let ((rc (sh cmd))) (if (= rc 0) #t (error (format "command failed rc=~a: ~a" rc cmd)))))
 (define (run-bg! cmd done)   ;; 后台运行，结束后写 done 文件（内容是退出码）

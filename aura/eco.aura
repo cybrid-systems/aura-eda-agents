@@ -32,7 +32,7 @@
 
 ;; ---- 专家：只读 fiber ----
 (define *experts* (list "drc" "netlist" "hb_graph" "layout_vpix"))
-(define (expert-cmd ck kind out) (string-append *py* " tools/eco3d.py query --ckpt " ck " --kind " kind " --out " out))
+(define (expert-cmd ck kind out) (string-append *py* " " *eco-tool* " query --ckpt " ck " --kind " kind " --out " out))
 (define (run-experts! ck dir tag kinds)
   (let* ((ch (channel:create 8))
          (fs (map (lambda (kind)
@@ -115,8 +115,8 @@
 
 ;; ---- 候选执行：fiber + overlay，apply + verify 一条后台命令 ----
 (define (cand-cmd cur pre prog-file target-file)
-  (string-append *py* " tools/eco3d.py apply --ckpt " cur " --program " prog-file " --out " pre ".ckpt.json --report " pre ".report.json && "
-                 *py* " tools/eco3d.py verify --before " cur " --after " pre ".ckpt.json --allowed @" pre ".report.json --target-file " target-file " --out " pre ".verify.json"))
+  (string-append *py* " " *eco-tool* " apply --ckpt " cur " --program " prog-file " --out " pre ".ckpt.json --report " pre ".report.json && "
+                 *py* " " *eco-tool* " verify --before " cur " --after " pre ".ckpt.json --allowed @" pre ".report.json --target-file " target-file " --out " pre ".verify.json"))
 
 (define (run-candidates! E cur cands target-file choose)   ;; -> (rs winner)；choose 从验证结果里挑胜出者，只有它 overlay-commit
   (let* ((dir (hget E "dir" ".")) (res (channel:create 8)) (fin (channel:create 8))

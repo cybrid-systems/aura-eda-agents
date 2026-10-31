@@ -17,7 +17,7 @@
 
 (define (pd-init! dir)
   (sh (string-append "mkdir -p " dir))
-  (run! (string-append *py* " tools/pdsim.py space --out " dir "/space.json"))
+  (run! (string-append *py* " " *pd-tool* " space --out " dir "/space.json"))
   (set! *pd-space* (read-json (string-append dir "/space.json"))))
 (define (pd-combos s) (hget (hget *pd-space* "combos" #f) (list-ref *pd-stages* s) (list)))
 (define (pd-neighbors s c) (list-ref (hget (hget *pd-space* "neighbors" #f) (list-ref *pd-stages* s) (list)) c))
@@ -41,7 +41,7 @@
          (from (if reuse (list-ref *pd-stages* b) "FP"))
          (pck (if reuse (list-ref (hget parent "ckpts" (list)) (- b 1)) "-"))
          (pre (format "~a/b~a" dir id)))
-    (list pre (string-append *py* " tools/pdsim.py chain --design " (ctx-get c "design") " --parent " pck " --from " from
+    (list pre (string-append *py* " " *pd-tool* " chain --design " (ctx-get c "design") " --parent " pck " --from " from
                              " --knobs idx:" (nums->csv idx) " --outdir " pre " --ledger " pre ".ledger.jsonl --out " pre ".json"))))
 
 (define (node-from-result c res parent b id)
@@ -224,11 +224,11 @@
 (define (pd-finish c)
   (let* ((dir (ctx-get c "dir")) (inc (pd-incumbent-node c)) (out (hash)))
     (if inc
-        (begin (run! (string-append *py* " tools/pdsim.py dr --ckpt " (list-ref (hget inc "ckpts" (list)) 3)
+        (begin (run! (string-append *py* " " *pd-tool* " dr --ckpt " (list-ref (hget inc "ckpts" (list)) 3)
                                     " --ledger " dir "/dr.ledger.jsonl --out " dir "/dr.json"))
                (hash-set! out "dr_wns" (hget (read-json (string-append dir "/dr.json")) "wns" #f)))
         (hash-set! out "dr_wns" #f))
-    (run! (string-append *py* " tools/pdsim.py ledger --glob '" dir "/*.ledger.jsonl' --out " dir "/ledger.json"))
+    (run! (string-append *py* " " *pd-tool* " ledger --glob '" dir "/*.ledger.jsonl' --out " dir "/ledger.json"))
     (let ((L (read-json (string-append dir "/ledger.json"))) (bs (ctx-get c "branch-stages")))
       (hash-set! out "design" (ctx-get c "design")) (hash-set! out "method" (ctx-get c "method"))
       (hash-set! out "gr_wns" (if inc (hget inc "wns" #f) #f))

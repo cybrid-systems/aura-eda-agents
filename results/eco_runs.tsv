@@ -60,3 +60,5 @@ eco-L-11	fullreroute	30	26	0	365	591	5	1	1	1	-	#t
 eco-L-11	stockrepair	30	30	0	0	591	0	1	1	1	-	#t
 eco-L-11	agent	30	15	0	34	591	0	1	1	40	#t	#t
 eco-L-11	agent-no-ecoroute	30	12	0	10	591	0	1	1	33	#t	#t
+eco-L-11	agent-no-hbgraph	30	17	0	19	591	0	1	1	40	#t	#t
+eco-L-11	agent-no-revise	30	13	0	9	591	0	1	1	26	#t	#t
