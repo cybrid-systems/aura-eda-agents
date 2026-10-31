@@ -1,4 +1,4 @@
-# 真实 ORFS 结果汇总
+# 真实 ORFS 结果汇总（gcd）
 
 **真实 OpenROAD-flow-scripts 运行**：设计 `gcd`，平台 `nangate45`，镜像 `openroad/orfs@sha256:cba40c1de21f048b545c005210dabe728bf501f4bb7d5ae5f03b33feb52b49fa`（2026-10-30 22:09 UTC+8），Yosys 0.68+post，NUM_CORES=4。SDC 时钟周期 0.25 ns，未修改。
 
@@ -23,7 +23,7 @@
 
 ## 搜索到的配置
 
-- 所有方法、所有种子合计评估了 110 个不同的完整配置（到 GR 成功），另有 11 个配置在 GR 失败。
-- 最好的 GR WNS 是 -158.565 ps，就是 ORFS 默认值；**没有任何配置优于默认**（0 个）。中位数 -165.363 ps，最差 -191.854 ps。
+- 所有方法、所有种子合计评估了 110 个不同的完整配置（到 GR 成功），另有 11 个配置失败。
+- 最好的 GR WNS 是 -158.565 ps，就是 ORFS 默认值；**没有任何配置优于默认**。中位数 -165.363 ps，最差 -191.854 ps。
 - 失败全部出现在 CORE_UTILIZATION=65，多数在 GR、少数在 CTS。GR 及 CTS 后的时序修复会加大单元面积，随后合法化失败，日志里是 `[ERROR DPL-0038] Utilization greater than 100%, impossible to legalize` 或 `[ERROR DPL-0033] detailed placement checks failed`。
 

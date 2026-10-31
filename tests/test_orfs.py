@@ -7,7 +7,7 @@
 """
 import json, os, subprocess, sys, tempfile
 B = os.path.join(os.path.dirname(__file__), "..", "adapters", "openroad", "backend.py")
-D = "gcd-nangate45"
+D = os.environ.get("ORFS_TEST_DESIGN", "gcd-nangate45")   # 空间版本由 ORFS_SPACE 决定（v1/v2）
 
 
 def chain(tmp, name, knobs, parent="-", frm="FP", nocache=True):
@@ -23,10 +23,14 @@ def main():
     if subprocess.run(["sudo", "-n", "docker", "image", "inspect", "openroad/orfs:latest"], capture_output=True).returncode:
         print("SKIP: 没有 docker 或 openroad/orfs 镜像"); return
     tmp = tempfile.mkdtemp(prefix="orfs-test-")
-    a = chain(tmp, "a", "6,5,0,3"); b = chain(tmp, "b", "6,5,0,3")
+    subprocess.run([sys.executable, B, "space", "--out", f"{tmp}/space.json"], check=True, env=dict(os.environ, PD_DESIGNS=D))
+    sp = json.load(open(f"{tmp}/space.json")); di = sp["default_idx"]
+    alt = list(di); alt[2] = (di[2] + 1) % len(sp["combos"]["CTS"]); alt[3] = (di[3] + 1) % len(sp["combos"]["GR"])
+    dflt, var = ",".join(map(str, di)), ",".join(map(str, alt))
+    a = chain(tmp, "a", dflt); b = chain(tmp, "b", dflt)
     assert a == b, ("不确定", a, b)
-    c = chain(tmp, "c", "6,5,7,1", parent=f"{tmp}/a/PL.json", frm="CTS")
-    full = chain(tmp, "d", "6,5,7,1")
+    c = chain(tmp, "c", var, parent=f"{tmp}/a/PL.json", frm="CTS")
+    full = chain(tmp, "d", var)
     assert c == {s: full[s] for s in ("CTS", "GR")}, ("复用不等价", c, full)
     print("ORFS-OK default GR", a["GR"], "branch GR", c["GR"])
 
