@@ -34,5 +34,10 @@ out += ["", "## 计算量（整个实验）", "",
         f"- 其中真正调用 ORFS 的：{len(real)} 次，实测 {sum(x['cost'] for x in real)/60:.1f} 分钟；"
         f"其余 {len(L)-len(real)} 次命中结果缓存（同一阶段同一上游旋钮，已由 tests/test_orfs.py 验证确定性）。",
         f"- 实验总墙钟：{meta['wall_minutes']:.1f} 分钟（{meta['start']} → {meta['end']}，UTC+8）。", ""]
+out += ["## 搜索到的配置", "",
+        f"- 所有方法、所有种子合计评估了 {meta['unique_complete_configs']} 个不同的完整配置（到 GR 成功），另有 {meta['unique_failing_configs']} 个配置在 GR 失败。",
+        f"- 最好的 GR WNS 是 {meta['best_seen_gr_wns_ps']} ps，就是 ORFS 默认值；**没有任何配置优于默认**（{meta['configs_better_than_default']} 个）。"
+        f"中位数 {meta['median_seen_gr_wns_ps']} ps，最差 {meta['worst_seen_gr_wns_ps']} ps。",
+        "- 失败都出现在 CORE_UTILIZATION=65：前三阶段成功，GR 后的修复让单元面积超过行容量，报 `[ERROR DPL-0038] Utilization greater than 100%, impossible to legalize`。", ""]
 open("results/summary_orfs.md", "w").write("\n".join(out) + "\n")
 print("\n".join(out))

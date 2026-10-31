@@ -1,0 +1,5 @@
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/gcd-nangate45/2/default/b0/FP.json", "cost": 4.045, "design": "gcd-nangate45", "ok": true, "reused": [], "stage": "FP", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/gcd-nangate45/2/default/b0/PL.json", "cost": 4.178, "design": "gcd-nangate45", "ok": true, "reused": [], "stage": "PL", "wall": 0.001}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/gcd-nangate45/2/default/b0/CTS.json", "cost": 4.498, "design": "gcd-nangate45", "ok": true, "reused": [], "stage": "CTS", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/gcd-nangate45/2/default/b0/GR.json", "cost": 32.95, "design": "gcd-nangate45", "ok": true, "reused": [], "stage": "GR", "wall": 0.002}
+{"cached": true, "ckpt": "/workspace/aura-eda-agents/runs/pd/gcd-nangate45/2/default/b0/GR.json", "cost": 17.287, "ok": true, "stage": "DR", "wall": 0.002}

@@ -1,0 +1,9 @@
+{"backend": "OpenROAD-flow-scripts (real)", "design": "gcd", "platform": "nangate45",
+ "design_config": "designs/nangate45/gcd/config.mk", "clock_period_ns": 0.25,
+ "image": "openroad/orfs:latest", "image_digest": "openroad/orfs@sha256:cba40c1de21f048b545c005210dabe728bf501f4bb7d5ae5f03b33feb52b49fa",
+ "image_created": "2026-10-30 22:09 UTC+8", "openroad_version": "unknown (image has no version string)", "yosys": "0.68+post",
+ "num_cores": 4, "host": "8 vCPU, 16 GB", "budget": 20, "seeds": [1, 2, 3], "width": 2,
+ "aura": "cybrid-systems/aura main 5af7fd023",
+ "start": "2026-10-31 08:37:48", "end": "2026-10-31 09:34:09", "wall_minutes": 56.35,
+ "unique_complete_configs": 110, "unique_failing_configs": 11, "best_seen_gr_wns_ps": -158.565,
+ "configs_better_than_default": 0, "median_seen_gr_wns_ps": -165.363, "worst_seen_gr_wns_ps": -191.854}
